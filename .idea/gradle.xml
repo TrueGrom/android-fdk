@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GradleMigrationSettings" migrationVersion="1" />
+  <component name="GradleSettings">
+    <option name="linkedExternalProjectsSettings">
+      <GradleProjectSettings>
+        <compositeConfiguration>
+          <compositeBuild compositeDefinitionSource="SCRIPT">
+            <builds>
+              <build path="$PROJECT_DIR$/build-logic" name="build-logic">
+                <projects>
+                  <project path="$PROJECT_DIR$/build-logic" />
+                  <project path="$PROJECT_DIR$/build-logic/convention" />
+                </projects>
+              </build>
+            </builds>
+          </compositeBuild>
+        </compositeConfiguration>
+        <option name="testRunner" value="CHOOSE_PER_TEST" />
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/bom" />
+            <option value="$PROJECT_DIR$/build-logic" />
+            <option value="$PROJECT_DIR$/build-logic/convention" />
+            <option value="$PROJECT_DIR$/crypto" />
+            <option value="$PROJECT_DIR$/datetime" />
+            <option value="$PROJECT_DIR$/http-error" />
+            <option value="$PROJECT_DIR$/logging" />
+            <option value="$PROJECT_DIR$/network" />
+            <option value="$PROJECT_DIR$/repository" />
+            <option value="$PROJECT_DIR$/screen" />
+            <option value="$PROJECT_DIR$/state" />
+            <option value="$PROJECT_DIR$/ui-kit" />
+            <option value="$PROJECT_DIR$/utils" />
+            <option value="$PROJECT_DIR$/viewmodel" />
+          </set>
+        </option>
+      </GradleProjectSettings>
+    </option>
+  </component>
+</project>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fdk_error_unexpected">Непредвиденная ошибка</string>
+    <string name="fdk_error_something_went_wrong">Что-то пошло не так…</string>
+    <string name="fdk_action_retry">Попробовать снова</string>
+</resources>

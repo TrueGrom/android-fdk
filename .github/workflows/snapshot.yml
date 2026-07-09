@@ -1,0 +1,43 @@
+name: Publish Snapshot
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # need tags to derive the snapshot version
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+          validate-wrappers: true
+
+      - name: Derive snapshot version
+        run: |
+          LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)
+          echo "FDK_PUBLISH_VERSION=${LATEST#v}-SNAPSHOT" >> "$GITHUB_ENV"
+
+      - name: Publish snapshot to Maven Central
+        run: ./gradlew publishToMavenCentral --no-configuration-cache
+        env:
+          FDK_PUBLISH_VERSION: ${{ env.FDK_PUBLISH_VERSION }}
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}

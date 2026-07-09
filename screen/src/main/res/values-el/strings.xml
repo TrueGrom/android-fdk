@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fdk_error_unexpected">Μη αναμενόμενο σφάλμα</string>
+    <string name="fdk_error_something_went_wrong">Κάτι πήγε στραβά…</string>
+    <string name="fdk_action_retry">Επανάληψη</string>
+</resources>
