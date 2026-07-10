@@ -1,5 +1,8 @@
 # Android Fast Development Kit
 
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.truegrom/bom?label=release)](https://central.sonatype.com/artifact/io.github.truegrom/bom)
+![Snapshot](https://img.shields.io/maven-metadata/v?metadataUrl=https%3A%2F%2Fcentral.sonatype.com%2Frepository%2Fmaven-snapshots%2Fio%2Fgithub%2Ftruegrom%2Fbom%2Fmaven-metadata.xml&label=snapshot)
+
 **FdKit** — Android **F**ast **D**evelopment **K**it. A modular Android library providing
 state, networking, persistence, logging, and slot-based Compose UI primitives for building apps fast.
 
@@ -69,6 +72,32 @@ dependencies {
     implementation("io.github.truegrom:screen:<version>")
 }
 ```
+
+### Snapshots
+
+Every push to `master` publishes a `-SNAPSHOT` build to the Central Portal snapshot repository
+(the current version is shown in the *snapshot* badge above). To use it, add the snapshot
+repository and pin the snapshot version:
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://central.sonatype.com/repository/maven-snapshots/")
+    }
+}
+```
+
+```kotlin
+dependencies {
+    implementation(platform("io.github.truegrom:bom:<version>-SNAPSHOT"))
+}
+```
+
+Snapshots are mutable — the same `-SNAPSHOT` version resolves to the newest build on each
+dependency refresh. Use them for trying unreleased changes, not in production.
 
 ## Requirements
 
