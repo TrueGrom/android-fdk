@@ -119,8 +119,18 @@ curl -o .claude/skills/using-fdkit/SKILL.md \
 
 ## Requirements
 
-- Android **minSdk 26** 
-- Java / Kotlin JVM target **17**
+Your app must meet these to build against FdKit:
+
+| Requirement             | Value       | Notes                                              |
+|-------------------------|-------------|----------------------------------------------------|
+| `minSdk`                | **26+**     | modules are built with minSdk 26                   |
+| `compileSdk`            | **37+**     | AAR metadata declares `minCompileSdk = 37`         |
+| Core library desugaring | **enabled** | modules are built with desugaring enabled          |
+| Java / Kotlin target    | **17+**     | modules ship Java 17 bytecode                      |
+| Kotlin                  | **2.2+**    | modules are compiled with Kotlin 2.3               |
+
+Module-specific:
+- `crypto`, `network`, `repository`, `viewmodel`, `screen` provide their bindings via **Hilt**.
 
 ## License
 
