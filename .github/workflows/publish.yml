@@ -12,7 +12,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # gh release create
 
     steps:
       - uses: actions/checkout@v5
@@ -38,3 +38,36 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
+
+      - name: Collect release artifacts
+        run: |
+          mkdir -p release-artifacts
+          find . -path '*/build/outputs/aar/*-release.aar' | while read -r aar; do
+            module=$(basename "$aar" -release.aar)
+            cp "$aar" "release-artifacts/${module}-${FDK_PUBLISH_VERSION}.aar"
+          done
+
+      - name: Generate release notes
+        run: |
+          {
+            echo "## Maven Central"
+            echo
+            echo '```kotlin'
+            echo "implementation(platform(\"io.github.truegrom:bom:${FDK_PUBLISH_VERSION}\"))"
+            echo '```'
+            echo
+            echo "| Module | Coordinates |"
+            echo "| --- | --- |"
+            for module in bom $(ls release-artifacts | sed "s/-${FDK_PUBLISH_VERSION}\.aar//"); do
+              echo "| [\`${module}\`](https://central.sonatype.com/artifact/io.github.truegrom/${module}/${FDK_PUBLISH_VERSION}) | \`io.github.truegrom:${module}:${FDK_PUBLISH_VERSION}\` |"
+            done
+          } > release-notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-artifacts/* \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
+            --generate-notes
