@@ -99,6 +99,24 @@ dependencies {
 Snapshots are mutable — the same `-SNAPSHOT` version resolves to the newest build on each
 dependency refresh. Use them for trying unreleased changes, not in production.
 
+## AI coding agents
+
+[`SKILL.md`](SKILL.md) is a machine-readable guide that teaches AI coding agents how to build
+features with FdKit — state management, screens, data layer, and the setup bindings. It follows
+the [Agent Skills](https://agentskills.io) format (plain Markdown with YAML frontmatter), so any
+agent can consume it. Wire it into your app's repo according to your tool:
+
+- **Claude Code**: copy to `.claude/skills/using-fdkit/SKILL.md` — picked up automatically for
+  FdKit-related work.
+- **Cursor / Copilot / other agents**: add it as a rule or instructions file (e.g.
+  `.cursor/rules/`, `.github/copilot-instructions.md`), or reference it as context in prompts.
+
+```bash
+mkdir -p .claude/skills/using-fdkit
+curl -o .claude/skills/using-fdkit/SKILL.md \
+  https://raw.githubusercontent.com/TrueGrom/android-fdk/master/SKILL.md
+```
+
 ## Requirements
 
 - Android **minSdk 26** 

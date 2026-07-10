@@ -52,6 +52,8 @@ jobs:
           {
             echo "## Maven Central"
             echo
+            echo "[![Maven Central](https://img.shields.io/badge/Maven_Central-${FDK_PUBLISH_VERSION}-blue?logo=apachemaven)](https://central.sonatype.com/artifact/io.github.truegrom/bom/${FDK_PUBLISH_VERSION})"
+            echo
             echo '```kotlin'
             echo "implementation(platform(\"io.github.truegrom:bom:${FDK_PUBLISH_VERSION}\"))"
             echo '```'
