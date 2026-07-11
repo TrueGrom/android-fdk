@@ -96,7 +96,7 @@ AppTheme {
         // each param defaults to the current Local*Defaults; override any subset:
         pagingDefaults = AppPagingDefaults,          // loaders for PagingContent
         errorEffectsDefaults = AppErrorDefaults,     // Throwable -> ErrorMessage mapping + dialog
-        // contentPaddingDefaults, loadingDefaults, topBarDefaults, baseScaffoldDefaults ...
+        // contentPaddingDefaults, loadingDefaults, topBarDefaults, refreshDefaults, baseScaffoldDefaults ...
     ) {
         AppContent()
     }
@@ -170,6 +170,7 @@ its own type, ownership rule, and UI consumer:
 | Remote-request lifecycle | `RemoteData<T>` inside state | (part of state) | `Fetchable` slots |
 | One-shot actions (navigation, snackbars) | `MutableActionManager<T>` | `ActionEmitter<T>` | `EventEffects` / `ConsumeEvents` |
 | Error presentations | `MutableErrorManager<A>` | `ErrorEmitter<A>` | `ErrorEffects` |
+| Pull-to-refresh in-flight flag | `RefreshController` | `RefreshOwner` (`StateFlow<Boolean>`) | `FdKitRefresh*` containers |
 
 Everything the screen *is* lives in one immutable `BaseState`; everything that *happens once*
 (navigate, toast) goes through actions/errors and is consumed, never stored in state.
@@ -180,7 +181,8 @@ Launch all background work through the helpers — never `viewModelScope.launch`
 
 - `task { }` / `asyncTask { }` — fire-and-forget / awaitable, cancelled with the ViewModel.
 - `uniqueTask(id) { }` / `asyncUniqueTask(id) { }` — keyed; a new run cancels the previous job
-  with the same id (typed-ahead search, pull-to-refresh, debounced saves).
+  with the same id (typed-ahead search, debounced saves). For pull-to-refresh prefer the
+  `RefreshController` mixin (below), which coalesces repeated pulls instead of restarting them.
 - `result handledError { e -> ... }` — logs the failure via the built-in `logger`, then runs the block.
 
 ### Defining state, builder, and ViewModel
@@ -302,6 +304,37 @@ class ProfileViewModel(/* ... */) : StateViewModel<ProfileState, ProfileStateBui
 before it throws `UninitializedPropertyAccessException`. Rule of thumb: new *verbs* over existing
 state → trait; new *owned state or coroutines* → delegate.
 
+### Pull-to-refresh: RefreshOwner + RefreshController
+
+Pull-to-refresh has its own dedicated channel — the in-flight flag lives *outside* the screen
+state, in a `RefreshOwner` (`refreshing: StateFlow<Boolean>` + `refresh()`), so the UI container
+recomposes only on flag changes. Mix it into any ViewModel (not just `StateViewModel`) by class
+delegation and bind scope + work in `init`:
+
+```kotlin
+@HiltViewModel
+class FeedViewModel @Inject constructor(
+    private val refresher: RefreshController = RefreshController(),
+) : StateViewModel<FeedState, FeedStateBuilder>(...), RefreshOwner by refresher {
+
+    init { refresher.initialize(viewModelScope, ::reload) }
+
+    private suspend fun reload() { /* same code path as the initial load */ }
+}
+```
+
+Guarantees baked into `RefreshController` — do not re-implement them:
+
+- Concurrent pulls **coalesce** into one run (atomic `compareAndSet` gate).
+- The flag resets in `finally` — recovers on failure *and* cancellation.
+- **No error handling**: failures inside the work must flow through the standard error path
+  (`ErrorManager` / `visualError`), same as any other operation.
+- `refresh()` before `initialize()` throws `UninitializedPropertyAccessException` (fail-fast).
+
+Two-phase `initialize()` is deliberate: the `by`-delegation expression cannot reference
+`viewModelScope`. Screens whose state already carries a refreshing flag skip the mixin and use the
+primitive `FdKitRefresh*` overloads (section 6) — the approaches interoperate without adapters.
+
 ### RemoteData — the request-lifecycle value
 
 `RemoteData<T>` is a sealed class: `Loading`, `Fetched(data)`, `Error(error)` — exhaustive `when`
@@ -391,6 +424,13 @@ Building blocks:
   `ScaffoldScope` on which the content helpers are callable.
 - **Content helpers** (on `ScaffoldScope`): `FdKitScreenColumn` (static), `FdKitScrollableScreen`
   (eager scroll column), `FdKitLazyScreen` (LazyColumn). All apply `ContentPaddingDefaults`.
+- **Pull-to-refresh containers**: `FdKitRefreshContainer` (Box, optionally self-scrolling),
+  `FdKitRefreshColumn` (eager scroll column), `FdKitRefreshLazyColumn` (LazyColumn) — Material3
+  `PullToRefreshBox` wrappers whose indicator comes from `RefreshDefaults`
+  (`LocalRefreshDefaults`, settable via `FdkScreenDefaults`). Each comes in two overloads: a
+  `RefreshOwner`-receiver one that collects the flag lifecycle-aware and triggers `refresh()`
+  (`viewModel.FdKitRefreshLazyColumn { items(...) { ... } }`), and a primitive one
+  (`isRefreshing` + `onRefresh`) for screens that manage the flag themselves.
 - **`Fetchable`** — renders `RemoteData` with slot DSL: `Fetched { }`, optional `Loading { }`,
   `Error { }` or `retry { }` (`retry` keeps the app-wide error UI and wires the callback; last
   writer wins between `Error`/`retry`). The `StateViewModel` overload collects state
@@ -445,7 +485,8 @@ When writing consumer code, enforce:
 4. Repositories return `Either<HttpError, T>` (or throw typed `HttpError` via `http`); wrap
    blocking calls in `ioContext`.
 5. UI observes: `Fetchable` for `RemoteData`, `ErrorEffects` for `ErrorReaction`, `EventEffects` /
-   `ConsumeEvents` for one-shot actions — each consumer marks its events consumed.
+   `ConsumeEvents` for one-shot actions, `FdKitRefresh*` containers for `RefreshOwner` — each
+   consumer marks its events consumed.
 6. Expose read-only contracts to the UI (`StateOwner`, `ErrorEmitter`, `ActionEmitter`); keep the
    mutable managers internal to the ViewModel.
 7. Theme app-wide via `FdkScreenDefaults` once; per-call slot parameters override locally.

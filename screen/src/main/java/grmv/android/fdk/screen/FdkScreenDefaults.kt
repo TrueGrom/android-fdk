@@ -18,6 +18,8 @@ import grmv.android.fdk.screen.error.ErrorEffectsDefaults
 import grmv.android.fdk.screen.error.LocalErrorEffectsDefaults
 import grmv.android.fdk.screen.paging.LocalPagingDefaults
 import grmv.android.fdk.screen.paging.PagingDefaults
+import grmv.android.fdk.screen.refresh.LocalRefreshDefaults
+import grmv.android.fdk.screen.refresh.RefreshDefaults
 import grmv.android.fdk.screen.topbars.LocalTopBarDefaults
 import grmv.android.fdk.screen.topbars.TopBarDefaults
 
@@ -54,9 +56,9 @@ fun ProvideFdKitBaseScaffoldDefaults(
  *
  * A single entry point that wires the app-wide theming contracts consumed across the screen
  * building blocks: [ContentPaddingDefaults] (screen spacing), [LoadingDefaults] (shared loaders),
- * [ErrorEffectsDefaults] (error presentation), [PagingDefaults] ([PagingContent] load states), and
- * [TopBarDefaults] (`FdKit*TopBar` presets). Place it once, high in the composition (typically just
- * inside your theme).
+ * [ErrorEffectsDefaults] (error presentation), [PagingDefaults] ([PagingContent] load states),
+ * [TopBarDefaults] (`FdKit*TopBar` presets), and [RefreshDefaults] (`FdKitRefresh*` pull
+ * indicator). Place it once, high in the composition (typically just inside your theme).
  *
  * Each parameter defaults to the current value from its `Local*Defaults`, so this may be called
  * with no arguments (all Material3 fallbacks), with a subset overridden, or nested — an unset slot
@@ -68,6 +70,7 @@ fun ProvideFdKitBaseScaffoldDefaults(
  * @param errorEffectsDefaults error-message mapping and dialog presentation.
  * @param pagingDefaults paged-list load-state slots.
  * @param topBarDefaults theming for the `FdKit*TopBar` presets.
+ * @param refreshDefaults pull-to-refresh indicator for the `FdKitRefresh*` containers.
  * @param baseScaffoldDefaults slot defaults for [FdKitBaseScaffold].
  * @param content composition scoped to the provided defaults.
  */
@@ -78,6 +81,7 @@ fun FdkScreenDefaults(
     errorEffectsDefaults: ErrorEffectsDefaults = LocalErrorEffectsDefaults.current,
     pagingDefaults: PagingDefaults = LocalPagingDefaults.current,
     topBarDefaults: TopBarDefaults = LocalTopBarDefaults.current,
+    refreshDefaults: RefreshDefaults = LocalRefreshDefaults.current,
     baseScaffoldDefaults: FdKitBaseScaffoldDefaults = LocalFdKitBaseScaffoldDefaults.current,
     content: @Composable () -> Unit,
 ) {
@@ -87,6 +91,7 @@ fun FdkScreenDefaults(
         LocalErrorEffectsDefaults provides errorEffectsDefaults,
         LocalPagingDefaults provides pagingDefaults,
         LocalTopBarDefaults provides topBarDefaults,
+        LocalRefreshDefaults provides refreshDefaults,
         LocalFdKitBaseScaffoldDefaults provides baseScaffoldDefaults,
         content = content,
     )
