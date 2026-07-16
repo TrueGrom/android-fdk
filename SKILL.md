@@ -214,7 +214,8 @@ class ProfileViewModel @Inject constructor(
     private val repository: UserRepository,
 ) : StateViewModel<ProfileState, ProfileStateBuilder>(
     MutableStateOwner { ProfileState() }, ::ProfileStateBuilder,
-), ErrorManager<Nothing> by MutableErrorManager() {
+), ErrorManager<Nothing> by MutableErrorManager(),
+   ActionManager<ProfileEvent> by MutableActionManager() {   // screen exposes only ActionEmitter
 
     init { refresh() }
 
@@ -352,8 +353,9 @@ flow — the UI then renders it with `Fetchable` (section 6) off the single stat
 
 ### One-shot actions and errors
 
-- **Actions** (navigation, custom events): implement `ActionEmitter<T>` by delegating to
-  `MutableActionManager<T>()`; emit with `sendAction(event)`. The flow is conflated — a new action
+- **Actions** (navigation, custom events): implement `ActionManager<T>` (the writable interface, it
+  extends the read-only `ActionEmitter<T>`) by delegating to `MutableActionManager<T>()`; emit with
+  `sendAction(event)`, and expose only `ActionEmitter<T>`. The flow is conflated — a new action
   replaces an unconsumed one; the UI consumer (`EventEffects` / `ConsumeEvents`) dispatches and
   calls `consumeAction`, which resets to `null` only if that action is still current. Model events
   as a sealed interface; mark snackbar-worthy ones with `SnackbarEvent`.
@@ -399,7 +401,7 @@ fun ProfileScreen(onBack: () -> Unit) = ViewModelScreen<ProfileViewModel> {  // 
     }
 
     FdKitBaseScaffold(
-        topBar = { FdKitTopBarTextTitle(title = "Profile", onBack = onBack) },
+        topBar = { FdKitTopBarTextTitle(title = "Profile", onNavigateBack = onBack) },
         snackbarHost = { ScreenSnackbarHost(snackbar) },
     ) {
         viewModel.Fetchable<Profile, ProfileState> {
@@ -435,17 +437,21 @@ Building blocks:
   `Error { }` or `retry { }` (`retry` keeps the app-wide error UI and wires the callback; last
   writer wins between `Error`/`retry`). The `StateViewModel` overload collects state
   lifecycle-aware; the plain `RemoteData<T>.Fetchable` overload serves nested fields.
-- **`PagingContent`** — `Flow<PagingData<T>>.PagingContent(itemKey = { it.id }) { Item { i, x -> ... } }`.
-  Pull-to-refresh built in; slots `Loading/Error/Empty/AppendLoading/AppendError/Prepend` fall back
-  to `LocalPagingDefaults`. Programmatic refresh: `rememberPagingController()` passed as
-  `controller`, then `controller.refresh()`/`retry()`.
+- **`PagingContent`** — `Flow<PagingData<T>>.PagingContent(itemKey = { it.id.toString() }) { Item { i, x -> ... } }`
+  (`itemKey` is `(T) -> String` — convert non-string ids). Pull-to-refresh built in; slots
+  `Item/Loading/Error/Empty/AppendLoading/AppendError/Prepend`, of which `Loading/Error/
+  AppendLoading/AppendError` fall back to `LocalPagingDefaults` (`Empty` and `Prepend` have no
+  default — render nothing unless you supply them). Programmatic refresh:
+  `rememberPagingController()` passed as `controller`, then `controller.refresh()`/`retry()`.
 - **Snackbars are UI-only**: ViewModels never hold a `SnackbarManager`; they emit events whose type
   implements `SnackbarEvent` (declares its snackbar via the `SnackbarBuilder` DSL).
   `snackbar.ConsumeEvents(viewModel)` consumes only `SnackbarEvent`s; everything else stays pending
   for `EventEffects` — the two compose safely on one screen.
-- **Top bars**: `FdKitTopBarTextTitle` / `FdKitTopBarHeadlineTitle` (back-arrow defaults),
-  `FdKitFeatureTopBar` (no back default — avatar/menu). All read `LocalTopBarDefaults` and wire
-  `scrollBehavior` from `ScaffoldSettings`.
+- **Top bars**: `FdKitTopBarTextTitle` / `FdKitTopBarHeadlineTitle` (back arrow via
+  `onNavigateBack: (() -> Unit)?` — the callback param is `onNavigateBack`, not `onBack`; pass
+  `navigationIcon` to replace the icon entirely), `FdKitFeatureTopBar` (no back default —
+  `navigationIcon` defaults to `TopBarDefaults.FeatureNavigationIcon` for an avatar/menu). All read
+  `LocalTopBarDefaults` and wire `scrollBehavior` from `ScaffoldSettings`.
 - **ui-kit**: `FdKitCenterBox` (Box- and Column-scoped centering), `currentLocale`, and
   locale-aware date formatting in composables:
   `localizedFormat(date) { ddMMMyyyy() }` — recomposes on device-language change.
@@ -467,11 +473,18 @@ back to `CryptoConfig.defaultAad`, then device `ANDROID_ID`, then empty. All met
 
 ## 8. Datetime (`datetime`)
 
-Extension functions on `LocalDate`/`LocalDateTime`, all taking an explicit `Locale`
-(named after their pattern): `ddMMyyyy`, `ddMMM`, `ddMMMyyyy`, `MMMdyyyy`, `EEEE`, `MMMMyyyy`,
-`Hmm`, `ddMMyyyyHmm`, plus `*OptionalYear` variants that omit the year when it equals the current
-year (system clock at call time) and `rangeOptionalYear(locale, start, end)`. In Compose, prefer
-the `ui-kit` `localizedFormat` wrappers, which resolve the ambient locale.
+Extension functions named after their pattern, each taking an explicit `Locale`. The two receivers
+have **separate, non-interchangeable** sets:
+
+- `LocalDate`: `ddMMyy`, `ddMM`, `ddMMyyyy`, `ddMMM`, `ddMMMyyyy`, `ddMMMMyyyy`, `MMMdyyyy`,
+  `MMMMyyyy`, `EEEE`, `ddMMMOptionalYear`.
+- `LocalDateTime`: `Hmm`, `ddMMyyyy`, `ddMMyyyyHmm`, `ddMMOptionalYear`, `ddMMMOptionalYear`,
+  `ddMMMMOptionalYear`, `ddMMMHmmOptionalYear`.
+
+Only the listed `*OptionalYear` functions exist — there is no `OptionalYear` variant of every
+pattern. They omit the year when it equals the current one (system clock at call time). Plus the
+top-level `rangeOptionalYear(locale, start, end)` for `LocalDate` ranges. In Compose, prefer the
+`ui-kit` `localizedFormat` wrappers, which resolve the ambient locale.
 
 ## 9. Rules checklist
 
