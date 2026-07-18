@@ -142,20 +142,24 @@ class UserRepository @Inject constructor(
     @BaseHttp private val client: HttpClient,   // SDK's pre-configured Ktor client
 ) : BaseRepository(dispatchers, errorMapper) {
 
-    suspend fun profile(): Either<HttpError, Profile> = ioContext {
-        httpSafeCall { client.get("users/me").body<Profile>() }
+    suspend fun profile(): Profile = ioContext {
+        http { client.get("users/me").body() }   // throws mapped HttpError — pairs with the ViewModel Result recipes
     }
 }
 ```
 
 Rules:
 
-- `httpSafeCall { }` returns `Either<HttpError, T>` and never throws (cancellation excepted);
-  `http { }` returns `T` and throws the mapped `HttpError` — use it when an upstream error sink
-  (ViewModel) handles failures.
+- Prefer `http { }`: it returns `T` and throws the mapped `HttpError`, feeding the ViewModel
+  `Result` recipes (section 5) directly. `httpSafeCall { }` returns `Either<HttpError, T>` and
+  never throws (cancellation excepted) — for the rare call site that branches on `HttpError`
+  subtypes in place.
 - Neither switches dispatchers — wrap blocking/non-main-safe work in `ioContext { }`.
 - Branch on `HttpError` subtypes: `ResponseError(code)` (non-2xx), `NetworkError` (transient —
   offer retry), `ContentError` (deserialization — contract bug, don't retry), `UnknownError`.
+- Map API models to display-ready domain types in the repository — `LocalDate` (formatted via the
+  datetime module), value-class ids — before results reach ViewModel state; state never holds raw
+  DTO strings.
 - The `@BaseHttp` `HttpClient` already has ContentNegotiation(JSON), retry plugin, base URL, and
   timeout config; inject it rather than constructing clients.
 
@@ -217,20 +221,26 @@ class ProfileViewModel @Inject constructor(
 ), ErrorManager<Nothing> by MutableErrorManager(),
    ActionManager<ProfileEvent> by MutableActionManager() {   // screen exposes only ActionEmitter
 
-    init { refresh() }
+    init { load() }
 
-    fun refresh() = uniqueTask("refresh") {          // re-trigger cancels the in-flight run
+    private suspend fun fetchData(): Result<Unit> = runCatchingRethrowCancellation {
+        val profile = repository.profile()           // throwing repo method (built on http { })
+        state { fetched(profile) }                   // success write INSIDE the catching block
+    }
+
+    fun load() = uniqueTask("load") {                // re-trigger cancels the in-flight run
         state { loading() }
-        repository.profile()
-            .onRight { profile -> state { fetched(profile) } }
-            .onLeft { error -> state { failed(error) } }
+        fetchData() handledError { state { failed(it) } }   // logs, then error → state → Fetchable
     }
 
     fun save() = task {
         state { lock() }                             // one emission: UI disables inputs
-        repository.save(getActualState().draftName)
-            .onLeft { error -> showError(error) { snackbar() } }
-        state { unlock() }
+        try {
+            runCatchingRethrowCancellation { repository.save(getActualState().draftName) }
+                .visualError { snackbar() }
+        } finally {
+            state { unlock() }                       // runs on failure and cancellation too
+        }
     }
 }
 ```
@@ -370,6 +380,58 @@ repository.save(data) visualError { snackbar() }
 repository.save(data) visualError { dialog().withAction(RetryAction) }
 ```
 
+### Standard recipes — initial load / refresh / user action
+
+`ProfileViewModel` above already follows the standard shape: one shared `fetchData()` for every
+entry point (built on a throwing `http { }` repository method — section 4), with entry points
+differing only in spinner policy and error presentation. The third entry point — refresh — reuses
+the same `fetchData()` under the same task key:
+
+```kotlin
+// Silent refresh (ON_RESUME, retry-after-action) — no loading(), transient error
+fun refresh() = uniqueTask("load") {   // same key as load(): latest entry point wins
+    fetchData() visualError { dialog() }
+}
+```
+
+`visualError` shows the error but does **not** log it. When a production breadcrumb matters, chain
+`handledError { }` (empty block — log-only) before it:
+`fetchData() handledError { } visualError { dialog() }`.
+
+Why the split — mixing the channels up is the classic mistake: a refresh failure must not wipe
+good content into an error screen, and an initial-load failure must not be a dismissable
+toast over a blank screen:
+
+- **Load** errors are *persistent*: they replace the (absent) content, live in `remoteData`, and
+  the screen renders the app-wide error UI with retry via `Fetchable`'s `retry { viewModel.load() }`
+  slot.
+- **Refresh** errors are *transient*: content is already on screen, so skip `loading()` (it would
+  hide the list under the spinner) and surface the failure as a dialog/snackbar via `visualError` —
+  not in state. For pull-to-refresh specifically, prefer the `RefreshController` mixin
+  (`init { refresher.initialize(viewModelScope, ::reload) }` where
+  `reload() = fetchData() visualError { dialog() }`) — it coalesces repeated pulls and resets the
+  flag in `finally`; `uniqueTask` restarts instead.
+- **Actions** never touch `remoteData`; they lock the UI (`LockOps`), report failure transiently,
+  and clean up in `try/finally` — FdKit deliberately ships no `Result`-extension "finally"
+  operator (it cannot run on cancellation because `onError`/`visualError` rethrow eagerly).
+- All load-path entry points share one `uniqueTask` key so competing runs supersede each other.
+
+Choosing an error operator:
+
+| Situation | Operator |
+|---|---|
+| Load error → persistent error state with retry | `handledError { state { failed(it) } }` (logs, then block) |
+| Transient error (refresh, action) → dialog/snackbar/toast | `visualError { dialog() }` |
+| Side effect on failure, no logging | `onError { }` |
+| Side effect on success *and* failure (not cancellation) | `onAnyResult { }` |
+| Fire-and-forget failure (analytics, prefetch) | `handledError { }` — log only, never surface |
+| Cleanup that must run even on cancellation | plain `try/finally` around the chain |
+| Raw `Result.onFailure` / `fold` | avoid — both hand `CancellationException` to the lambda; use `onError` (plus `onSuccess` when both branches are needed) |
+
+All of these rethrow `CancellationException` — never hand-roll `rethrowCancellation()` around them.
+Paging screens are a separate case: `PagingContent` renders loading/error/empty itself — no
+`RemoteData`, `Fetchable`, or `RefreshOwner` involved.
+
 ### Exposure discipline
 
 Expose only read-only contracts to the UI layer: `StateOwner<T>`, `ActionEmitter<T>`,
@@ -495,12 +557,17 @@ When writing consumer code, enforce:
 2. All ViewModel coroutines go through `task`/`uniqueTask`; keyed variants for supersede-previous
    semantics.
 3. State mutations only via `state { }` builder blocks; batch related mutations into one block.
-4. Repositories return `Either<HttpError, T>` (or throw typed `HttpError` via `http`); wrap
-   blocking calls in `ioContext`.
-5. UI observes: `Fetchable` for `RemoteData`, `ErrorEffects` for `ErrorReaction`, `EventEffects` /
+   Blocks are non-suspend by design — load first, then write the result into state.
+4. Follow the load/refresh/action recipes: persistent load errors via
+   `handledError { state { failed(it) } }`; transient refresh/action errors via `visualError`;
+   refresh paths skip `loading()` so content stays visible.
+5. Repositories throw typed `HttpError` via `http` (pairs with the ViewModel `Result` recipes);
+   `httpSafeCall`/`Either` only where the caller branches on error subtypes. Wrap blocking calls
+   in `ioContext`. Map DTOs to display-ready domain types before they reach state.
+6. UI observes: `Fetchable` for `RemoteData`, `ErrorEffects` for `ErrorReaction`, `EventEffects` /
    `ConsumeEvents` for one-shot actions, `FdKitRefresh*` containers for `RefreshOwner` — each
    consumer marks its events consumed.
-6. Expose read-only contracts to the UI (`StateOwner`, `ErrorEmitter`, `ActionEmitter`); keep the
+7. Expose read-only contracts to the UI (`StateOwner`, `ErrorEmitter`, `ActionEmitter`); keep the
    mutable managers internal to the ViewModel.
-7. Theme app-wide via `FdkScreenDefaults` once; per-call slot parameters override locally.
-8. Public FdKit types are `Fdk`/`FdKit`-prefixed; follow the same convention when extending the SDK.
+8. Theme app-wide via `FdkScreenDefaults` once; per-call slot parameters override locally.
+9. Public FdKit types are `Fdk`/`FdKit`-prefixed; follow the same convention when extending the SDK.
