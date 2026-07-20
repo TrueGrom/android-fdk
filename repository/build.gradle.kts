@@ -12,5 +12,7 @@ dependencies {
     implementation(project(":utils"))
     implementation(project(":logging"))
     api(project(":http-error"))
+
+    api(libs.androidx.paging.runtime)
 }
 
