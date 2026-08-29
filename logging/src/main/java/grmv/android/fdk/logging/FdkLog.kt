@@ -31,7 +31,43 @@ object FdkLog : LogSink {
         delegate = NoOpLogger
     }
 
-    override fun tagged(tag: String): LogSink = delegate.tagged(tag)
+    override fun tagged(tag: String): LogSink = DeferredTaggedSink(tag)
+
+    /**
+     * Tagged sink that resolves the active backend on every call instead of capturing it once.
+     *
+     * A logger is routinely obtained before [install] runs — `protected val logger: LogSink by lazy
+     * { loggerForClass() }` binds on the first log call of a long-lived object. Capturing the
+     * delegate at that moment would pin the sink to [NoOpLogger] for the object's whole lifetime
+     * and silently drop every message. The resolved sink is cached until the backend changes, so
+     * the steady state costs one reference comparison per call.
+     */
+    private class DeferredTaggedSink(private val tag: String) : LogSink {
+        @Volatile
+        private var source: LogSink = NoOpLogger
+
+        @Volatile
+        private var tagged: LogSink = NoOpLogger.tagged(tag)
+
+        private fun current(): LogSink {
+            val backend = delegate
+            if (backend !== source) {
+                tagged = backend.tagged(tag)
+                source = backend
+            }
+            return tagged
+        }
+
+        override fun v(message: String, vararg args: Any?) = current().v(message, *args)
+        override fun d(message: String, vararg args: Any?) = current().d(message, *args)
+        override fun i(message: String, vararg args: Any?) = current().i(message, *args)
+        override fun w(message: String, vararg args: Any?) = current().w(message, *args)
+        override fun e(throwable: Throwable?, message: String, vararg args: Any?) =
+            current().e(throwable, message, *args)
+
+        /** Retags from the active backend, matching [TaggedFallbackSink]: tags replace, never nest. */
+        override fun tagged(tag: String): LogSink = DeferredTaggedSink(tag)
+    }
 
     override fun v(message: String, vararg args: Any?) = delegate.v(message, *args)
     override fun d(message: String, vararg args: Any?) = delegate.d(message, *args)

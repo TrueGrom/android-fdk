@@ -8,6 +8,15 @@ import androidx.paging.LoadState.Loading
 import androidx.paging.LoadState.NotLoading
 import androidx.paging.compose.LazyPagingItems
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.time.Duration.Companion.seconds
+
+/**
+ * How long [EndRefreshOnLoadingEvent] waits for the requested reload to reach [Loading] before
+ * giving up on ever seeing it. Only the start of the load is bounded — once it begins, the wait for
+ * it to finish is open-ended.
+ */
+private val LOADING_START_TIMEOUT = 1.seconds
 
 /** Invokes [block] when the append load state is [Loading]. */
 internal inline fun <T : Any> LazyPagingItems<T>.ifPageLoading(block: () -> Unit) {
@@ -84,6 +93,10 @@ internal inline fun <T : Any> LazyPagingItems<T>.ifEmpty(block: () -> Unit) {
 /**
  * Waits for [items] to transition through [Loading] and back to [NotLoading] or [Error], then
  * calls [endRefresh]. No-ops when [isRefreshing] is `false`.
+ *
+ * A reload that resolves before this collector starts never emits the [Loading] it waits for, so the
+ * wait is bounded — [endRefresh] still runs and the refreshing flag cannot stay raised for the rest
+ * of the composition.
  */
 @Composable
 internal fun <T : Any> EndRefreshOnLoadingEvent(
@@ -93,8 +106,12 @@ internal fun <T : Any> EndRefreshOnLoadingEvent(
 ) {
     LaunchedEffect(isRefreshing) {
         if (!isRefreshing) return@LaunchedEffect
-        snapshotFlow { items.loadState.refresh }.first { it is Loading }
-        snapshotFlow { items.loadState.refresh }.first { it is NotLoading || it is Error }
+        val started = withTimeoutOrNull(LOADING_START_TIMEOUT) {
+            snapshotFlow { items.loadState.refresh }.first { it is Loading }
+        }
+        if (started != null) {
+            snapshotFlow { items.loadState.refresh }.first { it is NotLoading || it is Error }
+        }
         endRefresh()
     }
 }
