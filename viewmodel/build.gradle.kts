@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.fdk.library)
-    alias(libs.plugins.fdk.hilt)
     alias(libs.plugins.fdk.publish)
 }
 

@@ -55,7 +55,8 @@ interface RefreshOwner {
  * before [initialize] throws [UninitializedPropertyAccessException] — an intentional fail-fast.
  *
  * Concurrent [refresh] calls coalesce into one run; the flag resets on completion, failure, and
- * cancellation alike. Exceptions from [work] propagate to [scope] untouched.
+ * cancellation alike — including a [refresh] issued after [scope] was already cancelled.
+ * Exceptions from [work] propagate to [scope] untouched.
  */
 @Stable
 class RefreshController : RefreshOwner {
@@ -78,13 +79,13 @@ class RefreshController : RefreshOwner {
 
     override fun refresh() {
         if (!_refreshing.compareAndSet(expect = false, update = true)) return
-        scope.launch {
-            try {
-                yield() // guarantee `refreshing = true` is observable even if `work` never suspends
-                work()
-            } finally {
-                _refreshing.value = false
-            }
+        val job = scope.launch {
+            yield() // guarantee `refreshing = true` is observable even if `work` never suspends
+            work()
         }
+        // Not a `finally` inside the coroutine: launching on an already-cancelled scope produces a
+        // coroutine whose body never runs, which would leave the flag raised forever. A completion
+        // handler fires for that case too.
+        job.invokeOnCompletion { _refreshing.value = false }
     }
 }

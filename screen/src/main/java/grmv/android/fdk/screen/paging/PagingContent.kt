@@ -26,6 +26,7 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import grmv.android.fdk.screen.LocalContentPaddingDefaults
+import grmv.android.fdk.screen.refresh.LocalRefreshDefaults
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -81,6 +82,10 @@ import kotlinx.coroutines.flow.Flow
  * flow.PagingContent(itemKey = { it.id }, controller = paging) { Item { _, x -> Row(x) } }
  * ```
  *
+ * The pull-to-refresh indicator is drawn by the current
+ * [LocalRefreshDefaults][grmv.android.fdk.screen.refresh.LocalRefreshDefaults], so it matches the
+ * `FdKitRefresh*` containers.
+ *
  * @param itemKey stable key for each item, used for efficient list updates.
  * @param contentPadding padding around the list content; defaults to the current [ContentPaddingDefaults].
  * @param controller optional handle for triggering [refresh][FdkPagingController.refresh]/
@@ -115,6 +120,7 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         state = refreshState,
+        indicator = { with(LocalRefreshDefaults.current) { Indicator(isRefreshing, refreshState) } },
         onRefresh = {
             isRefreshing = true
             items.refresh()

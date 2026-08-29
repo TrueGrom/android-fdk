@@ -86,44 +86,49 @@ fun <ErrorAction : Any> ErrorEmitter<ErrorAction>.ErrorEffects(
             val message = errorMessage(error.error)
             dialog(message) {
                 error.action?.let { errorAction?.invoke(it) }
-                consumeError(errorIntent)
+                consumeError(error)
             }
         }
 
         is ErrorReaction.SnackBar<*> -> {
-            val message = errorMessage(error.error)
+            @Suppress("UNCHECKED_CAST")
+            val snackbar = error as ErrorReaction.SnackBar<ErrorAction>
+            val message = errorMessage(snackbar.error)
             if (snackbarHostState != null) {
-                LaunchedEffect(error) {
-                    val actionLabel = if (error.action != null) snackbarActionLabel else null
+                LaunchedEffect(snackbar) {
+                    val actionLabel = if (snackbar.action != null) snackbarActionLabel else null
                     val result = snackbarHostState.showSnackbar(
                         message = message.text,
                         actionLabel = actionLabel,
                         duration = SnackbarDuration.Short,
                     )
                     if (result == SnackbarResult.ActionPerformed) {
-                        @Suppress("UNCHECKED_CAST")
-                        (error as? ErrorReaction.SnackBar<ErrorAction>)?.action
-                            ?.let { errorAction?.invoke(it) }
+                        snackbar.action?.let { errorAction?.invoke(it) }
                     }
-                    consumeError(errorIntent)
+                    consumeError(snackbar)
                 }
             } else {
-                ToastEffect(message = message.text, onShown = { consumeError(errorIntent) })
+                ToastEffect(reaction = snackbar, message = message.text, onShown = { consumeError(snackbar) })
             }
         }
 
         is ErrorReaction.Toast -> {
             val message = errorMessage(error.error)
-            ToastEffect(message = message.text, onShown = { consumeError(errorIntent) })
+            ToastEffect(reaction = error, message = message.text, onShown = { consumeError(error) })
         }
     }
 }
 
-/** Shows [message] as a system toast exactly once and invokes [onShown]. */
+/**
+ * Shows [message] as a system toast exactly once per [reaction] and invokes [onShown].
+ *
+ * Keyed on the [reaction] instance, not the text — a retry that fails with the same message is a
+ * new reaction and must re-show (and re-consume), otherwise the error would stay unconsumed.
+ */
 @Composable
-private fun ToastEffect(message: String, onShown: () -> Unit) {
+private fun ToastEffect(reaction: ErrorReaction<*>, message: String, onShown: () -> Unit) {
     val context = LocalContext.current
-    LaunchedEffect(message) {
+    LaunchedEffect(reaction) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         onShown()
     }
