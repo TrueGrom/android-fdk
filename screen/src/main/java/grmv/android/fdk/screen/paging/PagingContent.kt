@@ -2,6 +2,7 @@ package grmv.android.fdk.screen.paging
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Arrangement.Vertical
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
@@ -11,6 +12,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -20,12 +22,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Alignment.Horizontal
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import grmv.android.fdk.screen.LocalContentPaddingDefaults
+import grmv.android.fdk.screen.content.FdkItemTransitions
+import grmv.android.fdk.screen.content.LocalContentTransitionScope
+import grmv.android.fdk.screen.content.LocalContentTransitions
 import grmv.android.fdk.screen.refresh.LocalRefreshDefaults
 import kotlinx.coroutines.flow.Flow
 
@@ -65,6 +71,10 @@ import kotlinx.coroutines.flow.Flow
  * }
  * ```
  *
+ * The load-state slot animation resolves separately:
+ * [PagingScopeBuilder.transition] > [LocalContentTransitions] > no animation. Loaded items are
+ * never animated — only the load-state slots.
+ *
  * Every [PagingContent] beneath the provider now uses those loaders by default; a call site can
  * still override a single state via its DSL slot. [PagingScopeBuilder.Item],
  * [PagingScopeBuilder.Empty] and [PagingScopeBuilder.Prepend] are not part of [PagingDefaults] —
@@ -79,7 +89,7 @@ import kotlinx.coroutines.flow.Flow
  * ```
  * val paging = rememberPagingController()
  * Button(onClick = paging::refresh) { Text("Reload") }
- * flow.PagingContent(itemKey = { it.id }, controller = paging) { Item { _, x -> Row(x) } }
+ * flow.PagingContent(itemKey = { it.id.toString() }, controller = paging) { Item { _, x -> Row(x) } }
  * ```
  *
  * The pull-to-refresh indicator is drawn by the current
@@ -103,6 +113,10 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
     content: PagingScopeBuilder<T>.() -> Unit,
 ) {
     val scope = PagingScopeBuilderImpl<T>().apply(content).build()
+    // Set-but-null means "opt out"; see the matching note in RemoteDataContent.
+    val perCall = scope.transition
+    val transitions =
+        if (perCall != null) perCall() else LocalContentTransitions.current.itemTransitions()
     val items = collectAsLazyPagingItems()
     controller?.let { c ->
         DisposableEffect(c, items) {
@@ -134,7 +148,7 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
         ) {
             scope.prepend?.invoke(this)
             items.ifEmpty {
-                item("paging_slot_empty") { scope.empty(this) }
+                item("paging_slot_empty") { Slot(transitions, fadeOut = false) { scope.empty(this) } }
             }
             items.expand(
                 isRefreshing = isRefreshing,
@@ -148,20 +162,24 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
                         }
                     }
                     items.ifAppendPageLoading {
-                        item("paging_slot_append_loading") { scope.appendLoading(this) }
+                        item("paging_slot_append_loading") {
+                            Slot(transitions) { scope.appendLoading(this) }
+                        }
                     }
                     items.ifAppendPageError {
-                        item("paging_slot_append_error") { scope.appendError(this) { items.retry() } }
+                        item("paging_slot_append_error") {
+                            Slot(transitions) { scope.appendError(this) { items.retry() } }
+                        }
                     }
                 },
                 loading = {
                     item("paging_slot_loading") {
-                        scope.loading(this)
+                        Slot(transitions, fadeOut = false) { scope.loading(this) }
                     }
                 },
                 error = {
                     item("paging_slot_error") {
-                        scope.error(this) { items.retry() }
+                        Slot(transitions, fadeOut = false) { scope.error(this) { items.retry() } }
                     }
                 },
             )
@@ -170,10 +188,49 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
 }
 
 /**
+ * Emits a load-state [content] slot, animating its appearance, removal and placement when
+ * [transitions] is non-null.
+ *
+ * With no [transitions] the slot is emitted exactly as written, without the wrapping [Box] — the
+ * animated and non-animated paths stay layout-identical to what the call site would produce on its
+ * own, apart from the wrapper the animation itself requires.
+ *
+ * @param fadeOut `false` for the full-list slots, which fill the viewport: a departing full-screen
+ *   loader would fade out on top of the list that just replaced it. They are removed at once and
+ *   only their arrival is animated.
+ */
+@Composable
+private fun LazyItemScope.Slot(
+    transitions: FdkItemTransitions?,
+    fadeOut: Boolean = true,
+    content: @Composable LazyItemScope.() -> Unit,
+) {
+    // Lazy items animate through Modifier.animateItem, which exposes no AnimatedVisibilityScope,
+    // so the slot never inherits an animated ancestor's scope either.
+    CompositionLocalProvider(LocalContentTransitionScope provides null) {
+        if (transitions == null) {
+            content()
+        } else {
+            Box(
+                modifier = Modifier.animateItem(
+                    fadeInSpec = transitions.fadeIn,
+                    placementSpec = transitions.placement,
+                    fadeOutSpec = transitions.fadeOut.takeIf { fadeOut },
+                ),
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+/**
  * DSL receiver for configuring the slot composables of a single [PagingContent] call.
  *
- * [Item] is the only required slot. All others fall back to [LocalPagingDefaults] when unset,
- * which itself defaults to [Material3PagingDefaults].
+ * [Item] is the only required slot. The load-state slots ([Loading], [Error], [AppendLoading],
+ * [AppendError]) fall back to [LocalPagingDefaults], which itself defaults to
+ * [Material3PagingDefaults]; [Empty] and [Prepend] default to rendering nothing; [transition] falls
+ * back to [LocalContentTransitions], which itself defaults to no animation.
  *
  * @param T the item type held in the [androidx.paging.PagingData] stream.
  */
@@ -198,6 +255,19 @@ interface PagingScopeBuilder<T : Any> {
 
     /** Optional header items emitted before the list content. */
     fun Prepend(content: LazyListScope.() -> Unit)
+
+    /**
+     * Overrides the load-state slot animation for this call site.
+     *
+     * Return `null` to emit slots without animating — this is how a call site opts out of an
+     * app-wide [LocalContentTransitions] provider. When this slot is left unset, the current
+     * [LocalContentTransitions] applies, which itself defaults to
+     * [grmv.android.fdk.screen.content.FdkNoContentTransitions] (no animation).
+     *
+     * [spec] runs in composition, so it may read `MaterialTheme` and other composition locals. Its
+     * result is not expected to change at runtime.
+     */
+    fun transition(spec: @Composable () -> FdkItemTransitions?) = Unit
 }
 
 private class PagingScopeBuilderImpl<T : Any> : PagingScopeBuilder<T> {
@@ -216,6 +286,7 @@ private class PagingScopeBuilderImpl<T : Any> : PagingScopeBuilder<T> {
         with(LocalPagingDefaults.current) { AppendError(retry) }
     }
     private var prepend: (LazyListScope.() -> Unit)? = null
+    private var transition: (@Composable () -> FdkItemTransitions?)? = null
 
     override fun Item(content: @Composable LazyItemScope.(Int, T) -> Unit) { item = content }
     override fun Loading(content: @Composable LazyItemScope.() -> Unit) { loading = content }
@@ -224,8 +295,10 @@ private class PagingScopeBuilderImpl<T : Any> : PagingScopeBuilder<T> {
     override fun AppendLoading(content: @Composable LazyItemScope.() -> Unit) { appendLoading = content }
     override fun AppendError(content: @Composable LazyItemScope.(retry: () -> Unit) -> Unit) { appendError = content }
     override fun Prepend(content: LazyListScope.() -> Unit) { prepend = content }
+    override fun transition(spec: @Composable () -> FdkItemTransitions?) { transition = spec }
 
-    fun build() = PagingScopeImpl(item, loading, error, empty, appendLoading, appendError, prepend)
+    fun build() =
+        PagingScopeImpl(item, loading, error, empty, appendLoading, appendError, prepend, transition)
 }
 
 /**
@@ -264,4 +337,5 @@ private class PagingScopeImpl<T : Any>(
     val appendLoading: @Composable LazyItemScope.() -> Unit,
     val appendError: @Composable LazyItemScope.(retry: () -> Unit) -> Unit,
     val prepend: (LazyListScope.() -> Unit)?,
+    val transition: (@Composable () -> FdkItemTransitions?)?,
 )

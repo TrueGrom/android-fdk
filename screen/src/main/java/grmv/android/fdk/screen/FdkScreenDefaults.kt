@@ -10,6 +10,8 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import grmv.android.fdk.screen.content.LoadingDefaults
+import grmv.android.fdk.screen.content.FdkContentTransitions
+import grmv.android.fdk.screen.content.LocalContentTransitions
 import grmv.android.fdk.screen.content.LocalLoadingDefaults
 import grmv.android.fdk.screen.content.containerColor
 import grmv.android.fdk.screen.content.fabPosition
@@ -57,8 +59,9 @@ fun ProvideFdKitBaseScaffoldDefaults(
  * A single entry point that wires the app-wide theming contracts consumed across the screen
  * building blocks: [ContentPaddingDefaults] (screen spacing), [LoadingDefaults] (shared loaders),
  * [ErrorEffectsDefaults] (error presentation), [PagingDefaults] ([PagingContent] load states),
- * [TopBarDefaults] (`FdKit*TopBar` presets), and [RefreshDefaults] (`FdKitRefresh*` pull
- * indicator). Place it once, high in the composition (typically just inside your theme).
+ * [TopBarDefaults] (`FdKit*TopBar` presets), [RefreshDefaults] (`FdKitRefresh*` pull indicator),
+ * and [FdkContentTransitions] (state-slot animations). Place it once, high in the composition
+ * (typically just inside your theme).
  *
  * Each parameter defaults to the current value from its `Local*Defaults`, so this may be called
  * with no arguments (all Material3 fallbacks), with a subset overridden, or nested — an unset slot
@@ -72,6 +75,8 @@ fun ProvideFdKitBaseScaffoldDefaults(
  * @param topBarDefaults theming for the `FdKit*TopBar` presets.
  * @param refreshDefaults pull-to-refresh indicator for the `FdKitRefresh*` containers.
  * @param baseScaffoldDefaults slot defaults for [FdKitBaseScaffold].
+ * @param contentTransitions state-slot animations for `Fetchable` and `PagingContent`; defaults to
+ *   no animation.
  * @param content composition scoped to the provided defaults.
  */
 @Composable
@@ -83,6 +88,7 @@ fun FdkScreenDefaults(
     topBarDefaults: TopBarDefaults = LocalTopBarDefaults.current,
     refreshDefaults: RefreshDefaults = LocalRefreshDefaults.current,
     baseScaffoldDefaults: FdKitBaseScaffoldDefaults = LocalFdKitBaseScaffoldDefaults.current,
+    contentTransitions: FdkContentTransitions = LocalContentTransitions.current,
     content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(
@@ -93,6 +99,7 @@ fun FdkScreenDefaults(
         LocalTopBarDefaults provides topBarDefaults,
         LocalRefreshDefaults provides refreshDefaults,
         LocalFdKitBaseScaffoldDefaults provides baseScaffoldDefaults,
+        LocalContentTransitions provides contentTransitions,
         content = content,
     )
 }
