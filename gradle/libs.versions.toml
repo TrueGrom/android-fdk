@@ -13,7 +13,7 @@ ksp = "2.3.10"
 hilt = "2.60.1"
 kotlinpoet = "2.3.0"
 kotlinx-coroutines = "1.11.0"
-composeBom = "2026.06.01"
+composeBom = "2026.08.00"
 lifecycleRuntimeKtx = "2.11.0"
 timber = "5.0.1"
 tink = "1.23.0"
@@ -38,6 +38,7 @@ androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation" }
 androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
 
 androidx-lifecycle-viewmodel-ktx = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycleRuntimeKtx" }

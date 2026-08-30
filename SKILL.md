@@ -14,8 +14,8 @@ description: >
 FdKit is a modular Android SDK (group `io.github.truegrom`, Kotlin packages `grmv.android.fdk.*`)
 that provides a complete vertical slice for feature development: typed error handling,
 cancellation-safe `Result` operators, a builder-based `StateViewModel`, Hilt-wired networking and
-crypto, and slot-based Jetpack Compose screen scaffolding. Requirements: **minSdk 26**,
-**JVM target 17**, Hilt, Compose (Material3).
+crypto, and slot-based Jetpack Compose screen scaffolding. Your app must be on **minSdk 26** or
+higher, compile against **JVM target 17**, and use Hilt and Compose (Material3).
 
 ## 1. Installation
 
@@ -39,14 +39,12 @@ dependencies {
 }
 ```
 
-Resolve `<version>` to the latest release — check the Maven Central badge in the project README or
-`https://central.sonatype.com/artifact/io.github.truegrom/bom`; never guess a version.
+Resolve `<version>` to the latest release listed at
+`https://central.sonatype.com/artifact/io.github.truegrom/bom`; never guess a version. Snapshot
+builds are not intended for consumers.
 
-Snapshots: add `maven("https://central.sonatype.com/repository/maven-snapshots/")` and pin
-`bom:<version>-SNAPSHOT`. Never ship snapshots in production.
-
-Module dependency direction (low → high): `utils` → `logging`/`http-error` → `viewmodel`/`repository`
-→ `state` → `ui-kit` → `screen`. Pull in only what the layer needs.
+Artifacts bring their own dependencies transitively — declare only the ones whose API you use
+directly (`screen`, for instance, already pulls in `state` and `ui-kit`).
 
 ## 2. One-time app setup
 
@@ -79,8 +77,8 @@ class AppHttpConfig @Inject constructor() : HttpConfigProvider {
 
 ### Optional Hilt bindings — tuning
 
-`HttpTimeoutConfig`, `HttpJsonConfig`, and `CryptoConfig` are optional (`@BindsOptionalOf` inside
-the SDK). Bind an implementation only to override defaults; otherwise SDK defaults apply
+`HttpTimeoutConfig`, `HttpJsonConfig`, and `CryptoConfig` are optional. Bind an implementation only
+to override defaults; without a binding the SDK defaults apply
 (timeouts 30/20/35 s, `expectSuccess = true`, `followRedirects = false`; JSON
 `ignoreUnknownKeys = true`, `explicitNulls = false`; crypto AES256-GCM keyset under
 `tink_prefs`). Changing `CryptoConfig.keysetName`/`prefFileName`/`masterKeyUri` makes previously
@@ -96,12 +94,51 @@ AppTheme {
         // each param defaults to the current Local*Defaults; override any subset:
         pagingDefaults = AppPagingDefaults,          // loaders for PagingContent
         errorEffectsDefaults = AppErrorDefaults,     // Throwable -> ErrorMessage mapping + dialog
+        contentTransitions = FdkFadeContentTransitions, // opt in to animated state swaps
         // contentPaddingDefaults, loadingDefaults, topBarDefaults, refreshDefaults, baseScaffoldDefaults ...
     ) {
         AppContent()
     }
 }
 ```
+
+**State-slot animations are opt-in.** `LocalContentTransitions` defaults to
+`FdkNoContentTransitions`, so `Fetchable` and `PagingContent` swap slots in a single frame, without
+animation. `FdkFadeContentTransitions` cross-fades both.
+
+Implement `FdkContentTransitions` to supply your own specs. `transform()` returns a
+`ContentTransform?` (as for `AnimatedContent`) and drives `Fetchable`; `itemTransitions()` returns an
+`FdkItemTransitions?` — `fadeIn`/`fadeOut`/`placement` specs fed to `Modifier.animateItem` — and
+drives `PagingContent`. `null` from either means "no animation". Install it app-wide through
+`FdkScreenDefaults(contentTransitions = ...)`, or scope a subtree with
+`ProvideContentTransitions(...)`.
+
+Two behaviours worth knowing. `Fetchable` does not animate container size: while both slots are
+present the container is sized to their union, so a large slot fading out holds it open until the
+fade ends — visible only where both slots wrap their content, since two `fillMaxSize` slots make the
+union the viewport and the container never resizes.
+
+`PagingContent` animates its load-state slots only, never the loaded items, so a paged list's first
+render is unchanged: the initial loader is there from the list's first frame (which a lazy layout
+does not animate in) and is then removed instantly so it never covers the arriving list. The
+animation shows on the append path — next-page footer in and out, items above it settling — and on
+the error/empty slots. Items are left alone on purpose: a refresh replaces every key at once, so
+animating them turns one swap into a cascade of per-item fades. Cross-fading a paged list as a whole
+is not available: the refresh state lives inside `PagingContent`, so only a screen that already
+tracks its own `RemoteData` beside the paging flow can wrap the list in a `Fetchable`.
+
+While a `Fetchable` transition runs, its slots can read `LocalContentTransitionScope` (an
+`AnimatedVisibilityScope?`) to animate their own children. Shared elements take it as a parameter;
+`Modifier.animateEnterExit` is a member of `AnimatedVisibilityScope`, so it needs the scope as a
+receiver — `with(scope) { Modifier.animateEnterExit(...) }`. The `SharedTransitionScope` comes from
+your own `SharedTransitionLayout`. The value is `null` whenever the content is not animating —
+with animation off, and always inside `PagingContent` — so branch on it rather than asserting.
+
+While a transition runs both slots stay composed: the outgoing one keeps its effects running and
+keeps accepting input until the exit animation ends. With the default fade that is a couple of
+hundred milliseconds — long enough for a user to tap Retry in a fading-out `Error` slot a second
+time and send a second request. Guard any slot action that is not idempotent; the transition will
+not disable input for you.
 
 ## 3. Core utilities (`utils`)
 
@@ -116,8 +153,8 @@ coroutine code:
   `CancellationException` instead of capturing it. Prefer it over `runCatching` in any suspend path.
 - `result.onError { e -> ... }` — like `onFailure` but rethrows cancellation *eagerly*, before the
   block runs. Because it escapes the chain, a chained "finally-like" operator only fires when placed
-  first; for cleanup that must run even on cancellation, wrap the whole chain in `try/finally` —
-  do not invent a `Result`-extension "finally" operator.
+  first; for cleanup that must run even on cancellation, wrap the whole chain in `try/finally`.
+  There is no `Result`-extension "finally" operator.
 - `result.onAnyResult { ... }` — side effect on success and non-cancellation failure.
 - `throwable.rethrowCancellation()` — call at the top of any `catch (e: Throwable)`.
 - `dispatcher.context { ... }` — readable `withContext` shorthand.
@@ -412,8 +449,8 @@ toast over a blank screen:
   `reload() = fetchData() visualError { dialog() }`) — it coalesces repeated pulls and resets the
   flag in `finally`; `uniqueTask` restarts instead.
 - **Actions** never touch `remoteData`; they lock the UI (`LockOps`), report failure transiently,
-  and clean up in `try/finally` — FdKit deliberately ships no `Result`-extension "finally"
-  operator (it cannot run on cancellation because `onError`/`visualError` rethrow eagerly).
+  and clean up in `try/finally`: there is no `Result`-extension "finally" operator, because it
+  could not run on cancellation — `onError`/`visualError` rethrow eagerly.
 - All load-path entry points share one `uniqueTask` key so competing runs supersede each other.
 
 Choosing an error operator:
@@ -499,12 +536,19 @@ Building blocks:
   `Error { }` or `retry { }` (`retry` keeps the app-wide error UI and wires the callback; last
   writer wins between `Error`/`retry`). The `StateViewModel` overload collects state
   lifecycle-aware; the plain `RemoteData<T>.Fetchable` overload serves nested fields.
+  `transition { }` (returns `ContentTransform?`) overrides the state-swap animation for one call site
+  — `transition { null }` opts out of an app-wide provider; unset, it follows
+  `LocalContentTransitions`, which animates nothing by default. The transition is keyed on the
+  `RemoteData` variant, so a new `Fetched` payload recomposes without re-running it.
 - **`PagingContent`** — `Flow<PagingData<T>>.PagingContent(itemKey = { it.id.toString() }) { Item { i, x -> ... } }`
   (`itemKey` is `(T) -> String` — convert non-string ids). Pull-to-refresh built in; slots
   `Item/Loading/Error/Empty/AppendLoading/AppendError/Prepend`, of which `Loading/Error/
   AppendLoading/AppendError` fall back to `LocalPagingDefaults` (`Empty` and `Prepend` have no
   default — render nothing unless you supply them). Programmatic refresh:
   `rememberPagingController()` passed as `controller`, then `controller.refresh()`/`retry()`.
+  `transition { }` (returns `FdkItemTransitions?`) overrides the load-state slot animation for one
+  call site — `transition { null }` opts out; unset, it follows `LocalContentTransitions`. Loaded
+  items are never animated — only the load-state slots.
 - **Snackbars are UI-only**: ViewModels never hold a `SnackbarManager`; they emit events whose type
   implements `SnackbarEvent` (declares its snackbar via the `SnackbarBuilder` DSL).
   `snackbar.ConsumeEvents(viewModel)` consumes only `SnackbarEvent`s; everything else stays pending
@@ -570,4 +614,5 @@ When writing consumer code, enforce:
 7. Expose read-only contracts to the UI (`StateOwner`, `ErrorEmitter`, `ActionEmitter`); keep the
    mutable managers internal to the ViewModel.
 8. Theme app-wide via `FdkScreenDefaults` once; per-call slot parameters override locally.
-9. Public FdKit types are `Fdk`/`FdKit`-prefixed; follow the same convention when extending the SDK.
+9. Public FdKit types carry an `Fdk`/`FdKit` prefix (both spellings occur); the `Defaults` theming
+   contracts are the exception and are unprefixed.

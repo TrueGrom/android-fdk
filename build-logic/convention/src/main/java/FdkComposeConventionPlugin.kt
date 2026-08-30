@@ -23,7 +23,8 @@ class FdkComposeConventionPlugin : Plugin<Project> {
                 add("androidTestImplementation", bom)
 
                 add("api", libs.findLibrary("androidx-compose-material3").get())
-                add("implementation", libs.findLibrary("androidx-compose-ui").get())
+                add("api", libs.findLibrary("androidx-compose-animation").get())
+                add("api", libs.findLibrary("androidx-compose-ui").get())
                 add("implementation", libs.findLibrary("androidx-compose-runtime").get())
                 add("implementation", libs.findLibrary("androidx-compose-ui-tooling-preview").get())
                 add("debugImplementation", libs.findLibrary("androidx-compose-ui-tooling").get())
