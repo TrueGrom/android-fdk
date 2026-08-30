@@ -2,6 +2,7 @@ package grmv.android.fdk.screen.snackbar
 
 import android.content.Context
 import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -128,14 +129,22 @@ fun rememberSnackbarManager(
  * Drop this into [FdKitBaseScaffold]'s `snackbarHost` slot alongside a [rememberSnackbarHostState].
  * Internally renders each snackbar with the default Material3 [Snackbar] visuals.
  *
+ * Rides above the keyboard: the slot is composed outside the scaffold body, so nothing has consumed
+ * the ime inset there and [Modifier.imePadding] applies it in full. Without this a form's own
+ * validation message — the snackbar most likely to be shown while the keyboard is open — would
+ * render behind it. Deliberately always on, independent of `FdKitBaseScaffold`'s `avoidKeyboard`: that
+ * flag governs where the *body* ends, and a message that cannot be read is not a layout preference.
+ * Pass a `modifier` that consumes the inset to override.
+ *
  * @param hostState state object that controls which snackbar is visible.
+ * @param modifier applied before the keyboard padding.
  */
 @Composable
 fun ScreenSnackbarHost(
     hostState: SnackbarHostState,
     modifier: Modifier = Modifier,
 ) {
-    SnackbarHost(hostState = hostState, modifier = modifier) { data ->
+    SnackbarHost(hostState = hostState, modifier = modifier.imePadding()) { data ->
         Snackbar(snackbarData = data)
     }
 }

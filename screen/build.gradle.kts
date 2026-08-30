@@ -13,6 +13,7 @@ dependencies {
     api(project(":state"))
     api(libs.androidx.paging.compose)
     api(libs.androidx.hilt.lifecycle.viewmodel.compose)
+    implementation(project(":logging"))
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.compose.material.icons.core)
 }

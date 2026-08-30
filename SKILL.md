@@ -95,11 +95,19 @@ AppTheme {
         pagingDefaults = AppPagingDefaults,          // loaders for PagingContent
         errorEffectsDefaults = AppErrorDefaults,     // Throwable -> ErrorMessage mapping + dialog
         contentTransitions = FdkFadeContentTransitions, // opt in to animated state swaps
-        // contentPaddingDefaults, loadingDefaults, topBarDefaults, refreshDefaults, baseScaffoldDefaults ...
+        // contentPaddingDefaults, loadingDefaults, topBarDefaults, refreshDefaults,
+        // baseScaffoldDefaults ...
     ) {
         AppContent()
     }
 }
+```
+
+Scaffold slot defaults are overridden the same way, `copy` keeping the rest — e.g. to opt the whole
+app out of the keyboard padding that `FdKitBaseScaffold` applies by default:
+
+```kotlin
+baseScaffoldDefaults = LocalFdKitBaseScaffoldDefaults.current.copy(avoidKeyboard = false),
 ```
 
 **State-slot animations are opt-in.** `LocalContentTransitions` defaults to
@@ -542,7 +550,30 @@ Building blocks:
 - **`FdKitBaseScaffold`** — Material3 Scaffold wrapper. Slots (`topBar`, `bottomBar`,
   `snackbarHost`, `floatingActionButton`) receive `ScaffoldSettings` exposing the shared
   `scrollBehavior` so `FdKit*TopBar` presets collapse with content. The body receives a
-  `ScaffoldScope` on which the content helpers are callable.
+  `ScaffoldScope` on which the content helpers are callable. `avoidKeyboard` (on by default) pads the
+  **body** by the keyboard inset, so a form screen does not need `Modifier.imePadding()` — under
+  `enableEdgeToEdge()` the window is never resized for the keyboard, and without it the submit button
+  sits behind it with nothing to scroll. It shrinks the body's viewport rather than scrolling it, so
+  it serves a **scrolling or bottom-anchored** body: put a form in `FdKitScrollableScreen`, since a
+  static `FdKitScreenColumn` taller than what is left still overflows. Scope is the body alone — the
+  `bottomBar` and the FAB stay behind the keyboard, `ScreenSnackbarHost` pads itself and rides above
+  it regardless of the flag, and `ModalBottomSheet`/dialog content is a separate composition. Turn it
+  off per screen (`avoidKeyboard = false`) or app-wide via `baseScaffoldDefaults` (see above). On
+  API 26-29 the app manifest still needs `android:windowSoftInputMode="adjustResize"` for the inset
+  to be reported at all; `adjustPan` breaks it on every API level. Neither is enforceable from the
+  SDK.
+
+  Two consequences worth knowing: a full-bleed layer inside the body (a background with
+  `matchParentSize`) lays out into the shrunk box and so moves with the keyboard; and a FAB is never
+  lifted over the keyboard — Material3 derives the snackbar's offset from the FAB's measured height,
+  so padding that slot would count the inset twice. `hideFabWhenImeVisible` (off by default) drops
+  the FAB from the composition instead while the keyboard is up — note that a snackbar visible at
+  that moment drops by the FAB's height for one frame, since Material3 stacks it on top of the FAB.
+
+  In a **debuggable** build the scaffold warns once through `FdkLog` if the host activity *declares*
+  `windowSoftInputMode="adjustPan"`. It cannot see the case where an app declares nothing and the
+  framework resolves the mode itself, so a silent app is not proof of a correct manifest. Release
+  builds and apps without a `FdkLog` sink pay nothing.
 - **Content helpers** (on `ScaffoldScope`): `FdKitScreenColumn` (static), `FdKitScrollableScreen`
   (eager scroll column), `FdKitLazyScreen` (LazyColumn). All apply `ContentPaddingDefaults`.
 - **Pull-to-refresh containers**: `FdKitRefreshContainer` (Box, optionally self-scrolling),
