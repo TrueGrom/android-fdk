@@ -194,11 +194,31 @@ Rules:
 - Neither switches dispatchers — wrap blocking/non-main-safe work in `ioContext { }`.
 - Branch on `HttpError` subtypes: `ResponseError(code)` (non-2xx), `NetworkError` (transient —
   offer retry), `ContentError` (deserialization — contract bug, don't retry), `UnknownError`.
+  The hierarchy is `sealed`, so a `when` over it is exhaustive and the compiler prevents a
+  subtype of your own — carry app-specific context in `ResponseError.details` instead.
+- When one status covers several situations (a `403` that means "link expired" vs. "link already
+  spent"), parse the error body in the mapper and attach it as `ResponseError.details`
+  (`FdkResponseErrorDetails`, nullable and defaulted — mappers that don't need it stay
+  unchanged), then read it back with `detailsAs<T>()`. The SDK never inspects the value.
+- Ready-made `FdkResponseErrorDetails` shapes — or implement the interface yourself:
+  `FdkCodedError(code, detail)` (application error code), `FdkProblemDetails(...)` (RFC 9457
+  `problem+json` — Spring Boot, ASP.NET Core), `FdkRawErrorBody(body, contentType)` (verbatim
+  fallback; its `toString` hides the body). Requires http-error ≥ 0.3.0.
 - Map API models to display-ready domain types in the repository — `LocalDate` (formatted via the
   datetime module), value-class ids — before results reach ViewModel state; state never holds raw
   DTO strings.
 - The `@BaseHttp` `HttpClient` already has ContentNegotiation(JSON), retry plugin, base URL, and
   timeout config; inject it rather than constructing clients.
+
+Carrying the error body across one status (`details` / `detailsAs`):
+
+```kotlin
+// mapper — the only place that has the body parsed
+HttpError.ResponseError(code = 403, cause = e, details = FdkCodedError(body.errorCode))
+
+// call site — the app names its own accessor
+val HttpError.serverErrorCode: String? get() = detailsAs<FdkCodedError>()?.code
+```
 
 ## 5. State management (`viewmodel`, `state`) — the core of FdKit
 
