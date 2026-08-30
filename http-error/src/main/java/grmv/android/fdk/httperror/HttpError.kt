@@ -4,9 +4,12 @@ package grmv.android.fdk.httperror
  * Sealed hierarchy of errors produced by API calls.
  *
  * Catch [HttpError] to handle all SDK-level failures uniformly, or branch on
- * specific subtypes for targeted error handling.
+ * specific subtypes for targeted error handling — the hierarchy is `sealed`, so a `when`
+ * over it is exhaustive and no consumer can add a subtype that existing `is` checks would
+ * silently stop matching. To carry app-specific context, attach
+ * [ResponseError.details] rather than introducing a type of your own.
  */
-abstract class HttpError : Throwable() {
+sealed class HttpError : Throwable() {
     abstract override val cause: Throwable?
     abstract override val message: String?
 
@@ -15,12 +18,20 @@ abstract class HttpError : Throwable() {
      *
      * Branch on [code] to distinguish the specific failure.
      *
+     * When one status covers several situations — a `403` that may mean an expired link,
+     * a spent one, or a plain refusal — only the response body separates them. Whatever
+     * the [HttpErrorMapper] parsed out of it travels in [details]; read it back with
+     * [detailsAs].
+     *
      * @property code The HTTP status code returned by the server.
+     * @property details Whatever this app's [HttpErrorMapper] parsed out of the error
+     *   body, or `null` when it parsed nothing. See [FdkResponseErrorDetails].
      */
     data class ResponseError(
         val code: Int,
         override val cause: Throwable? = null,
-        override val message: String? = cause?.message
+        override val message: String? = cause?.message,
+        val details: FdkResponseErrorDetails? = null
     ) : HttpError()
 
     /**
