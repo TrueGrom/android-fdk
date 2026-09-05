@@ -28,7 +28,7 @@ data class SnackbarMessage internal constructor(
     internal val message: String,
     internal val actionLabel: String? = null,
     internal val withDismissAction: Boolean = false,
-    internal val duration: SnackbarDuration = SnackbarDuration.Short,
+    internal val duration: SnackbarDuration,
     internal val onAction: (() -> Unit)? = null,
     internal val onDismiss: (() -> Unit)? = null,
 )
@@ -47,7 +47,17 @@ interface SnackbarBuilder {
     /** Sets the action button label from a string resource. */
     fun actionLabel(@StringRes resId: Int)
 
-    /** Sets how long the snackbar stays visible. */
+    /**
+     * Sets how long the snackbar stays visible.
+     *
+     * Wins over the action-derived default: without this call a snackbar shows for
+     * [SnackbarDuration.Short] when it has no [actionLabel] and [SnackbarDuration.Long] when it
+     * has one. A snackbar is the only place its action exists, so one that offers something to
+     * tap has to outlive one that merely reports. Material3 draws the same line and goes further,
+     * to `Indefinite`; [SnackbarDuration.Long] stops short of that so an ignored undo still leaves
+     * on its own. [withDismissAction] does not enter into it — a dismiss affordance is a way out
+     * of the snackbar, not a reason to keep it around.
+     */
     fun duration(duration: SnackbarDuration)
 
     /** Shows a dismiss affordance on the snackbar. */
@@ -166,7 +176,7 @@ internal class SnackbarBuilderImpl(private val context: Context) : SnackbarBuild
     private var message: String = ""
     private var actionLabel: String? = null
     private var withDismissAction: Boolean = false
-    private var duration: SnackbarDuration = SnackbarDuration.Short
+    private var duration: SnackbarDuration? = null
     private var onAction: (() -> Unit)? = null
     private var onDismiss: (() -> Unit)? = null
 
@@ -183,8 +193,12 @@ internal class SnackbarBuilderImpl(private val context: Context) : SnackbarBuild
         message = message,
         actionLabel = actionLabel,
         withDismissAction = withDismissAction,
-        duration = duration,
+        duration = duration ?: defaultDuration(),
         onAction = onAction,
         onDismiss = onDismiss,
     )
+
+    /** Duration used when the caller set none; the rule is documented on [SnackbarBuilder.duration]. */
+    private fun defaultDuration(): SnackbarDuration =
+        if (actionLabel == null) SnackbarDuration.Short else SnackbarDuration.Long
 }

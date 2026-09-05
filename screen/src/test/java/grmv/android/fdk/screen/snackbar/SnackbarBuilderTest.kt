@@ -53,6 +53,48 @@ class SnackbarBuilderTest {
     }
 
     @Test
+    fun `action without duration - defaults to Long`() {
+        val msg = build {
+            message("Moved")
+            actionLabel("Undo")
+        }
+
+        assertEquals(SnackbarDuration.Long, msg.duration)
+    }
+
+    @Test
+    fun `explicit duration - wins over the action-derived default`() {
+        val msg = build {
+            message("Moved")
+            actionLabel("Undo")
+            duration(SnackbarDuration.Short)
+        }
+
+        assertEquals(SnackbarDuration.Short, msg.duration)
+    }
+
+    @Test
+    fun `dismiss affordance alone - does not extend the duration`() {
+        val msg = build {
+            message("Synced")
+            withDismissAction()
+        }
+
+        assertEquals(SnackbarDuration.Short, msg.duration)
+    }
+
+    @Test
+    fun `duration set before the action - order does not change the outcome`() {
+        val msg = build {
+            duration(SnackbarDuration.Indefinite)
+            message("Moved")
+            actionLabel("Undo")
+        }
+
+        assertEquals(SnackbarDuration.Indefinite, msg.duration)
+    }
+
+    @Test
     fun `resId overloads - resolve through context`() {
         every { context.getString(1) } returns "res-message"
         every { context.getString(2) } returns "res-action"

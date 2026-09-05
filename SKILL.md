@@ -77,12 +77,44 @@ class AppHttpConfig @Inject constructor() : HttpConfigProvider {
 
 ### Optional Hilt bindings — tuning
 
-`HttpTimeoutConfig`, `HttpJsonConfig`, and `CryptoConfig` are optional. Bind an implementation only
-to override defaults; without a binding the SDK defaults apply
+`HttpTimeoutConfig`, `HttpJsonConfig`, `HttpRetryConfig`, and `CryptoConfig` are optional. Bind an
+implementation only to override defaults; without a binding the SDK defaults apply
 (timeouts 30/20/35 s, `expectSuccess = true`, `followRedirects = false`; JSON
-`ignoreUnknownKeys = true`, `explicitNulls = false`; crypto AES256-GCM keyset under
-`tink_prefs`). Changing `CryptoConfig.keysetName`/`prefFileName`/`masterKeyUri` makes previously
-encrypted data undecryptable.
+`ignoreUnknownKeys = true`, `explicitNulls = false`, `coerceInputValues = true`; **no automatic
+retries**; crypto AES256-GCM keyset under `tink_prefs`). Changing
+`CryptoConfig.keysetName`/`prefFileName`/`masterKeyUri` makes previously encrypted data
+undecryptable.
+
+**Retries are opt-in.** `HttpRetryConfig.maxRetries` defaults to `0`, which skips installing
+`HttpRequestRetry` altogether — a failed request surfaces on its first attempt. Turn it on
+deliberately, because the backoff is paid in screen time: three attempts sleep ~1 s, 2 s and 4 s
+plus jitter, so a block rendering a loading state holds it ~7-10 s longer (more against a
+`Retry-After`). Only `GET`/`HEAD`/`OPTIONS` are replayed unless `retryableMethods` widens it.
+
+`shouldRetry(HttpRetryContext)` narrows retries the app has enabled — it is consulted after the
+`maxRetries`/`retryableMethods` checks, and returning `false` fails that request fast without
+disabling retries client-wide. The context carries `method`, `url`, `status` (5xx response) or
+`cause` (transport `IOException`, exactly one of the two), and `retry` counting from 1. The
+canonical use is answering from `ConnectivityManager`: with no transport at all, backoff cannot
+help, so do not spend it.
+
+```kotlin
+class AppRetryConfig @Inject constructor(
+    private val connectivity: ConnectivityObserver,
+) : HttpRetryConfig {
+    override val maxRetries = 3
+    override val retryableMethods = setOf(HttpMethod.Get, HttpMethod.Head)
+    override fun shouldRetry(context: HttpRetryContext) = connectivity.isOnline
+}
+```
+
+**JSON coercion** (`coerceInputValues = true`) keeps a value the client cannot represent from
+failing the whole body: an unknown enum constant decodes to the property's default, or to `null`
+when the property is nullable (`explicitNulls = false` makes that work). It applies per *class
+property* only — an unknown constant inside a `List<SomeEnum>` still fails the entire response, so
+model enum-typed list elements as raw `String` and parse them in the repository. Its price is
+silence: an incoming `null` for a non-nullable property with a default lands on that default
+instead of failing loudly.
 
 ### Compose defaults
 
@@ -603,7 +635,10 @@ Building blocks:
 - **Snackbars are UI-only**: ViewModels never hold a `SnackbarManager`; they emit events whose type
   implements `SnackbarEvent` (declares its snackbar via the `SnackbarBuilder` DSL).
   `snackbar.ConsumeEvents(viewModel)` consumes only `SnackbarEvent`s; everything else stays pending
-  for `EventEffects` — the two compose safely on one screen.
+  for `EventEffects` — the two compose safely on one screen. Duration follows the action when
+  `duration(...)` is not called: `Short` without an `actionLabel`, `Long` with one — a snackbar is
+  the only place its action exists, so an undo is not given four seconds to be noticed. Set
+  `duration()` explicitly to override; `withDismissAction()` does not affect the choice.
 - **Top bars**: `FdKitTopBarTextTitle` / `FdKitTopBarHeadlineTitle` (back arrow via
   `onNavigateBack: (() -> Unit)?` — the callback param is `onNavigateBack`, not `onBack`; pass
   `navigationIcon` to replace the icon entirely), `FdKitFeatureTopBar` (no back default —

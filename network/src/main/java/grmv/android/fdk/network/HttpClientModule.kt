@@ -13,10 +13,10 @@ import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.URLBuilder
 import io.ktor.http.contentType
+import io.ktor.http.takeFrom
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.json.Json
-import java.io.IOException
 import java.util.Optional
 import javax.inject.Qualifier
 import javax.inject.Singleton
@@ -53,24 +53,28 @@ internal class HttpClientModule {
             expectSuccess = timeouts.expectSuccess
 
             install(ContentNegotiation) {
-                json(
-                    Json {
-                        prettyPrint = jsonSettings.prettyPrint
-                        isLenient = jsonSettings.isLenient
-                        ignoreUnknownKeys = jsonSettings.ignoreUnknownKeys
-                        explicitNulls = jsonSettings.explicitNulls
-                    }
-                )
+                json(jsonSettings.buildJson())
             }
             if (retries.maxRetries > 0) {
                 install(HttpRequestRetry) {
                     maxRetries = retries.maxRetries
                     exponentialDelay()
                     retryIf { request, response ->
-                        response.status.value in 500..599 && request.method in retries.retryableMethods
+                        retries.shouldReplayResponse(
+                            status = response.status,
+                            method = request.method,
+                            retry = retryCount,
+                        ) { request.url }
                     }
                     retryOnExceptionIf { request, cause ->
-                        cause is IOException && request.method in retries.retryableMethods
+                        retries.shouldReplayFailure(
+                            cause = cause,
+                            method = request.method,
+                            retry = retryCount,
+                        ) {
+                            // Copied: build() mutates the builder when the host is empty.
+                            URLBuilder().takeFrom(request.url).build()
+                        }
                     }
                 }
             }
