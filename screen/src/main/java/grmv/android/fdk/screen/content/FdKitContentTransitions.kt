@@ -20,15 +20,17 @@ import grmv.android.fdk.state.RemoteData
  * App-wide transition used when a content building block swaps between its state slots.
  *
  * Applies to `Fetchable` ([RemoteData] content), whose [RemoteData.Loading] / [RemoteData.Fetched] /
- * [RemoteData.Error] slots are otherwise exchanged in a single frame, and to `PagingContent`, whose
- * load-state slots otherwise appear and disappear between two frames of a list.
+ * [RemoteData.Error] slots are otherwise exchanged in a single frame, and to paged content
+ * (`PagingContent`, `PagingGridContent`, `pagingItems`), whose load-state slots otherwise appear and
+ * disappear between two frames.
  *
  * Resolution order for a given call site:
  *
  * 1. **Per-call slot** — [RemoteDataScopeBuilder.transition] (for `Fetchable`) or
- *    [grmv.android.fdk.screen.paging.PagingScopeBuilder.transition] (for `PagingContent`) always wins for that one call site.
+ *    [grmv.android.fdk.screen.paging.FdkPagingSlotsBuilder.transition] (for `PagingContent` and the
+ *    paged grids) always wins for that one call site.
  * 2. **App-wide default** — otherwise the current [LocalContentTransitions] is used: [transform]
- *    for `Fetchable`, [itemTransitions] for `PagingContent`.
+ *    for `Fetchable`, [itemTransitions] for the paged layouts.
  * 3. **Library fallback** — [LocalContentTransitions] itself defaults to [FdkNoContentTransitions],
  *    i.e. no animation at all.
  *
@@ -79,7 +81,8 @@ interface FdkContentTransitions {
      * Specs for animating the appearance, disappearance and placement of a list's load-state slots,
      * or `null` to have them appear and disappear without animating.
      *
-     * Used by `PagingContent` for its loading / error / empty / append slots. The loaded items
+     * Used by `PagingContent`, `PagingGridContent` and the `pagingItems` extensions for their
+     * loading / error / empty / append slots. The loaded items
      * themselves are never animated: a refresh replaces the whole list, and animating that turns
      * into a cascade of placement animations rather than a transition.
      *
@@ -117,9 +120,10 @@ interface FdkContentTransitions {
  * recompositions.
  *
  * @param fadeIn spec for a slot entering the list.
- * @param fadeOut spec for a slot leaving the list. `PagingContent` ignores this for its
- *   full-list slots (loading / error / empty), which cover the whole viewport and would otherwise
- *   fade out on top of the list that just replaced them; it applies only to the append slots.
+ * @param fadeOut spec for a slot leaving the layout. The paged layouts ignore this for their
+ *   full-viewport slots (loading / error / empty), which cover the whole viewport and would
+ *   otherwise fade out on top of the content that just replaced them; it applies only to the append
+ *   slots.
  * @param placement spec for a slot moving because content above it changed size.
  */
 @Immutable
@@ -161,8 +165,8 @@ object FdkNoContentTransitions : FdkContentTransitions {
  * loading and error slots, the union is the viewport and the container never resizes at all.
  *
  * For lists it returns the default [FdkItemTransitions] — `Modifier.animateItem`'s own springs —
- * which `PagingContent` applies to its load-state slots, dropping the fade-out on the full-list
- * ones (see [FdkItemTransitions.fadeOut]).
+ * which the paged layouts apply to their load-state slots, dropping the fade-out on the
+ * full-viewport ones (see [FdkItemTransitions.fadeOut]).
  *
  * To align the fade with an app's own motion system — e.g. `MaterialTheme.motionScheme` once
  * material3 makes it public; it is `internal` in 1.4.0 — implement [FdkContentTransitions] and
@@ -213,13 +217,13 @@ val LocalContentTransitions =
  * and needs it as a receiver — `with(transition) { Modifier.animateEnterExit(...) }`:
  *
  * ```
- * Fetched { book ->
+ * Fetched { item ->
  *     val transition = LocalContentTransitionScope.current
  *     with(sharedTransitionScope) {
- *         Cover(
- *             book,
+ *         Thumbnail(
+ *             item,
  *             modifier = transition?.let {
- *                 Modifier.sharedElement(rememberSharedContentState("cover"), it)
+ *                 Modifier.sharedElement(rememberSharedContentState("thumbnail"), it)
  *             } ?: Modifier,
  *         )
  *     }

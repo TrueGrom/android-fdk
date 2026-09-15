@@ -9,7 +9,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * App-wide default spacing applied by the screen content helpers ([FdKitScreenColumn],
- * [FdKitScrollableScreen], [PagingContent], …).
+ * [FdKitScrollableScreen], [PagingContent], [PagingGridContent], …).
  *
  * Provide a custom instance once high in the composition via [ProvideContentPaddingDefaults] (or
  * through [FdkScreenDefaults]) to retune screen margins app-wide; each call site still overrides via

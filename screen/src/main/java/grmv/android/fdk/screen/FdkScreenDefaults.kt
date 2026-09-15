@@ -144,7 +144,8 @@ fun ProvideFdKitBaseScaffoldDefaults(
  *
  * A single entry point that wires the app-wide theming contracts consumed across the screen
  * building blocks: [ContentPaddingDefaults] (screen spacing), [LoadingDefaults] (shared loaders),
- * [ErrorEffectsDefaults] (error presentation), [PagingDefaults] ([PagingContent] load states),
+ * [ErrorEffectsDefaults] (error presentation), [PagingDefaults] (load states for paged lists and
+ * grids alike),
  * [TopBarDefaults] (`FdKit*TopBar` presets), [RefreshDefaults] (`FdKitRefresh*` pull indicator),
  * and [FdkContentTransitions] (state-slot animations). Place it once, high in the composition
  * (typically just inside your theme).
@@ -157,11 +158,11 @@ fun ProvideFdKitBaseScaffoldDefaults(
  * @param contentPaddingDefaults screen-edge spacing (content padding).
  * @param loadingDefaults shared loading-indicator presentation.
  * @param errorEffectsDefaults error-message mapping and dialog presentation.
- * @param pagingDefaults paged-list load-state slots.
+ * @param pagingDefaults load-state slots for paged content, list and grid alike.
  * @param topBarDefaults theming for the `FdKit*TopBar` presets.
  * @param refreshDefaults pull-to-refresh indicator for the `FdKitRefresh*` containers.
  * @param baseScaffoldDefaults slot defaults for [FdKitBaseScaffold].
- * @param contentTransitions state-slot animations for `Fetchable` and `PagingContent`; defaults to
+ * @param contentTransitions state-slot animations for `Fetchable` and paged content; defaults to
  *   no animation.
  * @param content composition scoped to the provided defaults.
  */
