@@ -626,24 +626,52 @@ Building blocks:
   `RemoteData` variant, so a new `Fetched` payload recomposes without re-running it.
 - **`PagingContent`** — `Flow<PagingData<T>>.PagingContent(itemKey = { it.id.toString() }) { Item { i, x -> ... } }`
   (`itemKey` is `(T) -> String` — convert non-string ids). Pull-to-refresh built in; slots
-  `Item/Loading/Error/Empty/AppendLoading/AppendError/Prepend`, of which `Loading/Error/
-  AppendLoading/AppendError` fall back to `LocalPagingDefaults` (`Empty` and `Prepend` have no
-  default — render nothing unless you supply them). Both error slots receive the failing
-  `Throwable` alongside `retry` (`Error(e, retry)`, `AppendError(e, retry)`) — word it through
+  `Item/Loading/EmptyError/RefreshError/Empty/PrependLoading/PrependError/AppendLoading/AppendError/Header`, of which everything but
+  `Item`, `Empty` and `Header` falls back to `LocalPagingDefaults` (`Empty` and `Header` have no
+  default — render nothing unless you supply them). All three error slots receive the failing
+  `Throwable` alongside `retry` (`EmptyError(e, retry)`, `RefreshError(e, retry)`, `AppendError(e, retry)`) — word it through
   `ErrorEffectsDefaults.errorMessage` — the mapper behind the error dialogs and snackbars — and word
   `LoadingDefaults.Error` from the same place, so one failure reads the same on a paged screen and
   on the screen beside it. `retry` stays `() -> Unit`: paging
   retries through `LazyPagingItems.retry()`. The value is re-read inside the slot's composition, so
   a second failure of a different kind is worded as itself. Programmatic refresh:
-  `rememberPagingController()` passed as `controller`, then `controller.refresh()`/`retry()`; hoist
+  `rememberPagingController()` passed as `controller`, then `controller.refresh()`/`retry()`.
+  `rememberPagingController(showsRefreshIndicator = true)` makes `refresh()` raise the pull indicator
+  for its duration — off by default, because a reload nobody asked for should not animate; turn it on
+  for a toolbar button, which otherwise looks inert now that loaded items are never replaced. Hoist
   `state` (`LazyListState`, `LazyGridState` for the grid) to drive the scroll yourself.
-  `transition { }` (returns `FdkItemTransitions?`) overrides the load-state slot animation for one
+  Pass `isRefreshing` + `onRefresh` to own the pull gesture when it reloads more than the paged
+  content (a header, a summary): the indicator then follows your flag and `onRefresh` replaces the
+  built-in `refresh()`, so reload the paging itself from it — via `controller`. Unset (the default),
+  the container owns both. `transition { }` (returns `FdkItemTransitions?`) overrides the load-state slot animation for one
   call site — `transition { null }` opts out; unset, it follows `LocalContentTransitions`. Loaded
   items are never animated — only the load-state slots.
+- **Loaded items are never replaced by a load-state slot.** `Loading` and `EmptyError` are the
+  *empty-state* presentations: they render only while `itemCount == 0`. A `PagingSource` over a local
+  store is invalidated by writes the screen never asked about, and every invalidation drives refresh
+  back through `Loading` — branching on the load state alone would tear the content off the screen on
+  each one. A refresh that *fails* over loaded items surfaces as the `RefreshError` banner instead,
+  emitted first (after `Prepend`, full-span in a grid, wrapping its content) and defaulting to the
+  append error's presentation, so an app that has skinned `AppendError` gets a matching banner
+  without doing anything. Override `PagingDefaults.RefreshError` to tell the two apart. While the
+  banner is up it is the only error surface — `AppendError` is suppressed, because `retry()` restarts
+  every failed load state at once and two messages would report one outcome.
 - **Migrating an existing `PagingDefaults`** (this release breaks it twice, deliberately): the slot
   receiver changes `LazyItemScope` -> `FdkPagingSlotScope`, and both error slots gain the failing
-  throwable — `Error(e, retry)`, `AppendError(e, retry)`. Slot bodies are unaffected: the new scope
-  carries `fillParentMax*` and `animateItem`, so only the `override` signatures change. The DSL
+  throwable, the empty-state one is renamed, and the static-header DSL slot `Prepend` becomes
+  `Header` (freed up for `PrependLoading`/`PrependError`, the real paging load states at that end,
+  both of which default to their append twins) — `Error(retry)` -> `EmptyError(e, retry)`,
+  `AppendError(e, retry)`. Both refresh slots fire off the same failed refresh and are told apart only
+  by whether items are on screen, so the names say when they render, not what failed. Slot bodies are
+  unaffected: the new scope
+  carries `fillParentMax*` and `animateItem`, so only the `override` signatures change.
+  `RefreshError` is additive and has a default body, so it breaks nothing. The containers also gained
+  `isRefreshing`/`onRefresh` after `state`; both default to `null`, so at source level only positional
+  callers that passed `content` without the trailing-lambda form need touching — but the composable's
+  descriptor changed, so consumers recompile against the new artifact either way (as they must for
+  the slot changes above). Tapping retry on a `RefreshError`
+  banner dismisses it and starts the reload silently — announcing it would mean a loader over loaded
+  content, which is the thing being fixed. The DSL
   builder interfaces are now `Fdk`-prefixed (`FdkPagingScopeBuilder`, `FdkPagingGridScopeBuilder`,
   `FdkPagingSlotsBuilder`); `PagingDefaults` itself keeps its name, like the rest of the defaults
   family. An app that implements only `LoadingDefaults` needs no change at all — the paging fallback

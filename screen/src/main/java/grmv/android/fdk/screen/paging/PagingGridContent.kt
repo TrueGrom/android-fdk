@@ -38,7 +38,7 @@ import kotlinx.coroutines.flow.Flow
  * covers the grid's width rather than one cell.
  *
  * Unlike [pagingItems], this measures its own viewport, so a slot's `fillParentMaxSize()` really
- * does fill the screen — which is also why a `Prepend` header combined with a full-viewport slot
+ * does fill the screen — which is also why a `Header` combined with a full-viewport slot
  * overflows: the header is pushed off screen while that slot is up. Either keep the header out of
  * the loading and empty states, or size those slots to wrap their content.
  *
@@ -68,6 +68,14 @@ import kotlinx.coroutines.flow.Flow
  * @param controller optional handle for triggering [refresh][FdkPagingController.refresh]/
  *   [retry][FdkPagingController.retry] programmatically; create it with [rememberPagingController].
  * @param state the grid's scroll position; hoist it to read or drive the scroll from the screen.
+ * @param isRefreshing caller-owned pull-to-refresh flag; `null` (the default) lets this composable
+ *   raise and lower its own; it requires [onRefresh], and must not switch between `null` and non-null
+ *   while a reload is in flight. See [PagingContent] for both rules.
+ * @param onRefresh called instead of [LazyPagingItems.refresh] when the user pulls; `null` (the
+ *   default) keeps the built-in reload. Whoever sets it must reload the paged content from it
+ *   (through a [FdkPagingController], say) — nothing else will. On its own it keeps the built-in
+ *   flag, which still retracts the indicator once that reload settles; with [isRefreshing] it hands
+ *   the whole gesture over.
  * @param content the slot DSL describing item, load-state and header presentations for this grid.
  */
 @Composable
@@ -79,9 +87,11 @@ fun <T : Any> Flow<PagingData<T>>.PagingGridContent(
     horizontalArrangement: Arrangement.Horizontal = Arrangement.spacedBy(12.dp),
     controller: FdkPagingController? = null,
     state: LazyGridState = rememberLazyGridState(),
+    isRefreshing: Boolean? = null,
+    onRefresh: (() -> Unit)? = null,
     content: FdkPagingGridScopeBuilder<T>.() -> Unit,
 ) {
-    PagedPullToRefresh(controller) { items, isRefreshing ->
+    PagedPullToRefresh(controller, isRefreshing, onRefresh) { items, refreshing ->
         // A lazy grid gives its items no viewport height (they are measured with an infinite main
         // axis), so a full-viewport slot has nothing to fill. Measuring the grid's own box here is
         // what lets `fillParentMaxSize()` in a slot mean the same thing it means in a list.
@@ -97,7 +107,7 @@ fun <T : Any> Flow<PagingData<T>>.PagingGridContent(
                 pagingItems(
                     items = items,
                     itemKey = itemKey,
-                    isRefreshing = isRefreshing,
+                    isRefreshing = refreshing,
                     slotViewport = slotViewport,
                     content = content,
                 )
@@ -151,7 +161,7 @@ fun <T : Any> LazyGridScope.pagingItems(
     content: FdkPagingGridScopeBuilder<T>.() -> Unit,
 ) {
     val scope = PagingGridScopeBuilderImpl<T>().apply(content).build()
-    scope.prepend?.invoke(this)
+    scope.header?.invoke(this)
     emitPagingSlots(
         items = items,
         slots = scope.slots,
@@ -222,7 +232,7 @@ private fun Dp.minusPadding(padding: Dp): Dp =
  * call.
  *
  * The load-state half is [FdkPagingSlotsBuilder], shared verbatim with the list DSL
- * ([FdkPagingScopeBuilder]); only [Item] and [Prepend] differ, since they are the two slots that
+ * ([FdkPagingScopeBuilder]); only [Item] and [Header] differ, since they are the two slots that
  * genuinely speak the layout — a grid item scope is not a list item scope.
  *
  * @param T the item type held in the [androidx.paging.PagingData] stream.
@@ -236,25 +246,26 @@ interface FdkPagingGridScopeBuilder<T : Any> : FdkPagingSlotsBuilder {
     fun Item(content: @Composable LazyGridItemScope.(Int, T) -> Unit)
 
     /**
-     * Optional header items emitted before the paged content. Receives the grid scope, so a header
-     * spanning the full width is `item(span = { GridItemSpan(maxLineSpan) }) { … }`.
+     * Optional static content emitted above the paged items. Receives the grid scope, so a header
+     * spanning the full width is `item(span = { GridItemSpan(maxLineSpan) }) { … }`. Unrelated to
+     * [FdkPagingSlotsBuilder.PrependLoading], which is the paging load state at that end.
      */
-    fun Prepend(content: LazyGridScope.() -> Unit)
+    fun Header(content: LazyGridScope.() -> Unit)
 }
 
 private class PagingGridScopeBuilderImpl<T : Any> :
     PagingSlotsBuilderImpl(), FdkPagingGridScopeBuilder<T> {
     private var item: @Composable LazyGridItemScope.(Int, T) -> Unit = { _, _ -> }
-    private var prepend: (LazyGridScope.() -> Unit)? = null
+    private var header: (LazyGridScope.() -> Unit)? = null
 
     override fun Item(content: @Composable LazyGridItemScope.(Int, T) -> Unit) { item = content }
-    override fun Prepend(content: LazyGridScope.() -> Unit) { prepend = content }
+    override fun Header(content: LazyGridScope.() -> Unit) { header = content }
 
-    fun build() = PagingGridScopeImpl(item, prepend, buildSlots())
+    fun build() = PagingGridScopeImpl(item, header, buildSlots())
 }
 
 private class PagingGridScopeImpl<T : Any>(
     val item: @Composable LazyGridItemScope.(Int, T) -> Unit,
-    val prepend: (LazyGridScope.() -> Unit)?,
+    val header: (LazyGridScope.() -> Unit)?,
     val slots: PagingSlots,
 )

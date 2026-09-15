@@ -37,7 +37,14 @@ interface PagingDefaults {
     fun FdkPagingSlotScope.Loading()
 
     /**
-     * Refresh error with a [retry] action, filling the viewport where one is known.
+     * Refresh error for the empty layout, with a [retry] action, filling the viewport where one is
+     * known.
+     *
+     * Named for *when* it renders, not for what failed: both this and [RefreshError] are driven by
+     * the same failed refresh, and only the presence of loaded items tells them apart. This one is
+     * shown while there is nothing else to show — the first load that failed, or a refresh that
+     * emptied the layout. Once items are on screen they stay there, and [RefreshError] reports the
+     * failure over them.
      *
      * [e] is the failure the refresh ended on. Word it through
      * [ErrorEffectsDefaults.errorMessage][grmv.android.fdk.screen.error.ErrorEffectsDefaults] — the
@@ -50,13 +57,57 @@ interface PagingDefaults {
      * `LazyPagingItems.retry()`, which needs nothing from the caller.
      */
     @Composable
-    fun FdkPagingSlotScope.Error(e: Throwable, retry: () -> Unit)
+    fun FdkPagingSlotScope.EmptyError(e: Throwable, retry: () -> Unit)
+
+    /**
+     * Refresh error shown **above loaded items**, with a [retry] action.
+     *
+     * The counterpart of [EmptyError] for a populated layout: loaded content is never torn off
+     * the screen by a failed refresh, so the failure is reported as a banner emitted first — where
+     * it is actually seen, unlike a footer under a long list. It wraps its content rather than filling the
+     * viewport, and in a grid it spans the full width.
+     *
+     * Defaults to [AppendError], whose shape it shares — a message with a retry action, sized to its
+     * content — so an app that has already skinned its append failures gets a matching banner for
+     * free. Override it to distinguish the two.
+     *
+     * [e] is the failure the refresh ended on, worded like [EmptyError]'s. [retry] dismisses the
+     * banner — on the configured transition, like any other slot — and leaves the loaded items in
+     * place. The reload it starts is *not* announced: the only way to announce it over loaded
+     * content would be a loader on every refresh, which is exactly what this slot exists to avoid.
+     * The banner comes back if the reload fails again.
+     */
+    @Composable
+    fun FdkPagingSlotScope.RefreshError(e: Throwable, retry: () -> Unit) {
+        AppendError(e, retry)
+    }
+
+    /**
+     * Previous-page loading header, above the loaded items.
+     *
+     * Only a [PagingSource][androidx.paging.PagingSource] that can page backwards ever reaches this
+     * — one entered at an anchor in the middle of the data rather than at its start. Defaults to
+     * [AppendLoading]: the same indicator, at the other end.
+     */
+    @Composable
+    fun FdkPagingSlotScope.PrependLoading() {
+        AppendLoading()
+    }
+
+    /**
+     * Previous-page error header for [e], with a [retry] action. Defaults to [AppendError], and
+     * reached under the same conditions as [PrependLoading].
+     */
+    @Composable
+    fun FdkPagingSlotScope.PrependError(e: Throwable, retry: () -> Unit) {
+        AppendError(e, retry)
+    }
 
     /** Append (next page) loading footer. */
     @Composable
     fun FdkPagingSlotScope.AppendLoading()
 
-    /** Append (next page) error footer for [e], with a [retry] action. Worded like [Error]'s. */
+    /** Append (next page) error footer for [e], with a [retry] action. Worded like [EmptyError]'s. */
     @Composable
     fun FdkPagingSlotScope.AppendError(e: Throwable, retry: () -> Unit)
 }
@@ -68,7 +119,9 @@ interface PagingDefaults {
  * presentation — so an app that supplies only a
  * [LoadingDefaults][grmv.android.fdk.screen.content.LoadingDefaults] already words a paged failure
  * exactly as it words a non-paged one. This fallback contributes the layout (full-viewport for the
- * refresh states, a padded footer for the append ones) and nothing else.
+ * empty-state refresh slots, a padded band for the append ones and for
+ * [RefreshError][PagingDefaults.RefreshError], which keeps its inherited default here) and nothing
+ * else.
  */
 internal object Material3PagingDefaults : PagingDefaults {
     @Composable
@@ -82,7 +135,7 @@ internal object Material3PagingDefaults : PagingDefaults {
     }
 
     @Composable
-    override fun FdkPagingSlotScope.Error(e: Throwable, retry: () -> Unit) {
+    override fun FdkPagingSlotScope.EmptyError(e: Throwable, retry: () -> Unit) {
         Box(
             modifier = Modifier.fillParentMaxSize(),
             contentAlignment = Alignment.Center,

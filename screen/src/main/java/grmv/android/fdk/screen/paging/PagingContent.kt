@@ -35,7 +35,9 @@ import kotlinx.coroutines.flow.Flow
  * (initial loading, refresh error, append loading/error) resolve in this order of precedence:
  *
  * 1. **Per-call slot** — a slot set in the [content] DSL ([FdkPagingSlotsBuilder.Loading],
- *    [FdkPagingSlotsBuilder.Error], [FdkPagingSlotsBuilder.AppendLoading], [FdkPagingSlotsBuilder.AppendError])
+ *    [FdkPagingSlotsBuilder.EmptyError], [FdkPagingSlotsBuilder.RefreshError],
+ *    [FdkPagingSlotsBuilder.PrependLoading], [FdkPagingSlotsBuilder.PrependError],
+ *    [FdkPagingSlotsBuilder.AppendLoading], [FdkPagingSlotsBuilder.AppendError])
  *    always wins for that one list.
  * 2. **App-wide default** — otherwise the current [LocalPagingDefaults] is used.
  * 3. **Material3 fallback** — [LocalPagingDefaults] itself defaults to [Material3PagingDefaults].
@@ -54,7 +56,8 @@ import kotlinx.coroutines.flow.Flow
  * ```
  * object AppPagingDefaults : PagingDefaults {
  *     @Composable override fun FdkPagingSlotScope.Loading() { /* your full-viewport loader */ }
- *     @Composable override fun FdkPagingSlotScope.Error(e: Throwable, retry: () -> Unit) { /* your error + retry */ }
+ *     @Composable override fun FdkPagingSlotScope.EmptyError(e: Throwable, retry: () -> Unit) { /* your empty-state error + retry */ }
+ *     @Composable override fun FdkPagingSlotScope.RefreshError(e: Throwable, retry: () -> Unit) { /* your banner over loaded items */ }
  *     @Composable override fun FdkPagingSlotScope.AppendLoading() { /* your footer loader */ }
  *     @Composable override fun FdkPagingSlotScope.AppendError(e: Throwable, retry: () -> Unit) { /* your footer error */ }
  * }
@@ -68,14 +71,23 @@ import kotlinx.coroutines.flow.Flow
  * The slots receive [FdkPagingSlotScope], not `LazyItemScope`, so that one instance serves lists and
  * grids alike; it carries the `fillParentMax*` and `animateItem` a slot needs.
  *
+ * ### Loaded items are never replaced
+ *
+ * [FdkPagingSlotsBuilder.Loading] and [FdkPagingSlotsBuilder.EmptyError] are the *empty-state*
+ * presentations: once items have loaded they stay on screen. A [androidx.paging.PagingSource] over a
+ * local store is invalidated by writes this screen never asked about, and each invalidation drives
+ * refresh back through `Loading` — a full-viewport loader on every one of them would make the list
+ * flicker. A refresh that *fails* over loaded items is reported by [FdkPagingSlotsBuilder.RefreshError]
+ * instead: a banner emitted ahead of the items, defaulting to the append error's presentation.
+ *
  * The load-state slot animation resolves separately:
  * [FdkPagingSlotsBuilder.transition] > [LocalContentTransitions] > no animation. Loaded items are
  * never animated — only the load-state slots.
  *
  * Every [PagingContent] beneath the provider now uses those loaders by default; a call site can
  * still override a single state via its DSL slot. [FdkPagingScopeBuilder.Item],
- * [FdkPagingSlotsBuilder.Empty] and [FdkPagingScopeBuilder.Prepend] are not part of [PagingDefaults] —
- * `Item` is required per call, `Empty`/`Prepend` default to nothing.
+ * [FdkPagingSlotsBuilder.Empty] and [FdkPagingScopeBuilder.Header] are not part of [PagingDefaults] —
+ * `Item` is required per call, `Empty`/`Header` default to nothing.
  *
  * ### Programmatic refresh
  *
@@ -84,7 +96,7 @@ import kotlinx.coroutines.flow.Flow
  * [rememberPagingController], pass it in, and call it:
  *
  * ```
- * val paging = rememberPagingController()
+ * val paging = rememberPagingController(showsRefreshIndicator = true)
  * Button(onClick = paging::refresh) { Text("Reload") }
  * flow.PagingContent(itemKey = { it.id.toString() }, controller = paging) { Item { _, x -> Row(x) } }
  * ```
@@ -92,6 +104,26 @@ import kotlinx.coroutines.flow.Flow
  * The pull-to-refresh indicator is drawn by the current
  * [LocalRefreshDefaults][grmv.android.fdk.screen.refresh.LocalRefreshDefaults], so it matches the
  * `FdKitRefresh*` containers and [PagingGridContent].
+ *
+ * ### Driving the pull from the screen
+ *
+ * By default a pull calls [LazyPagingItems.refresh] and the indicator retracts when that reload
+ * settles. A screen whose pull reloads more than the paged content — a header, a summary, anything
+ * fetched beside the list — hoists both halves instead:
+ *
+ * ```
+ * val paging = rememberPagingController()
+ * flow.PagingContent(
+ *     itemKey = { it.id.toString() },
+ *     controller = paging,
+ *     isRefreshing = state.isRefreshing,
+ *     onRefresh = { viewModel.reload(paging::refresh) },
+ * ) { Item { _, x -> Row(x) } }
+ * ```
+ *
+ * The indicator then follows the screen's own flag, and the built-in reload steps aside entirely —
+ * [onRefresh] is responsible for reloading the paged content too. This replaces dropping down to
+ * [pagingItems] and a hand-rolled `PullToRefreshBox`.
  *
  * @param itemKey stable key for each item, used for efficient list updates.
  * @param contentPadding padding around the list content; defaults to the current
@@ -101,6 +133,17 @@ import kotlinx.coroutines.flow.Flow
  * @param controller optional handle for triggering [refresh][FdkPagingController.refresh]/
  *   [retry][FdkPagingController.retry] programmatically; create it with [rememberPagingController].
  * @param state the list's scroll position; hoist it to read or drive the scroll from the screen.
+ * @param isRefreshing caller-owned pull-to-refresh flag; `null` (the default) lets this composable
+ *   raise and lower its own. Pass one when the pull reloads more than the paged content and the
+ *   indicator must stay up until all of it has settled; it requires [onRefresh], since nothing else
+ *   would raise it. Decide once: a value that switches between `null` and non-null while a reload is
+ *   in flight leaves the indicator showing the wrong thing, because neither flag knows what the
+ *   other one started.
+ * @param onRefresh called instead of [LazyPagingItems.refresh] when the user pulls; `null` (the
+ *   default) keeps the built-in reload. Whoever sets it must reload the paged content from it
+ *   (through a [FdkPagingController], say) — nothing else will. On its own it keeps the built-in
+ *   flag, which still retracts the indicator once that reload settles; with [isRefreshing] it hands
+ *   the whole gesture over.
  * @param content the slot DSL describing item, load-state and header presentations for this list.
  */
 @Composable
@@ -111,9 +154,11 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
     horizontalAlignment: Horizontal = Alignment.CenterHorizontally,
     controller: FdkPagingController? = null,
     state: LazyListState = rememberLazyListState(),
+    isRefreshing: Boolean? = null,
+    onRefresh: (() -> Unit)? = null,
     content: FdkPagingScopeBuilder<T>.() -> Unit,
 ) {
-    PagedPullToRefresh(controller) { items, isRefreshing ->
+    PagedPullToRefresh(controller, isRefreshing, onRefresh) { items, refreshing ->
         LazyColumn(
             state = state,
             contentPadding = contentPadding,
@@ -123,7 +168,7 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
             pagingItems(
                 items = items,
                 itemKey = itemKey,
-                isRefreshing = isRefreshing,
+                isRefreshing = refreshing,
                 content = content,
             )
         }
@@ -167,7 +212,7 @@ fun <T : Any> LazyListScope.pagingItems(
     content: FdkPagingScopeBuilder<T>.() -> Unit,
 ) {
     val scope = PagingScopeBuilderImpl<T>().apply(content).build()
-    scope.prepend?.invoke(this)
+    scope.header?.invoke(this)
     emitPagingSlots(
         items = items,
         slots = scope.slots,
@@ -194,14 +239,14 @@ fun <T : Any> LazyListScope.pagingItems(
  * DSL receiver for configuring the slot composables of a single [PagingContent] call.
  *
  * [Item] is the only required slot. The load-state slots ([FdkPagingSlotsBuilder.Loading],
- * [FdkPagingSlotsBuilder.Error], [FdkPagingSlotsBuilder.AppendLoading], [FdkPagingSlotsBuilder.AppendError])
+ * [FdkPagingSlotsBuilder.EmptyError], [FdkPagingSlotsBuilder.AppendLoading], [FdkPagingSlotsBuilder.AppendError])
  * fall back to [LocalPagingDefaults], which itself defaults to [Material3PagingDefaults];
- * [FdkPagingSlotsBuilder.Empty] and [Prepend] default to rendering nothing;
+ * [FdkPagingSlotsBuilder.Empty] and [Header] default to rendering nothing;
  * [FdkPagingSlotsBuilder.transition] falls back to [LocalContentTransitions], which itself defaults to
  * no animation.
  *
  * [FdkPagingGridScopeBuilder] is the same DSL for a grid: the load-state slots are shared verbatim,
- * and only [Item] and [Prepend] — the layout-specific halves — differ.
+ * and only [Item] and [Header] — the layout-specific halves — differ.
  *
  * @param T the item type held in the [androidx.paging.PagingData] stream.
  */
@@ -209,18 +254,19 @@ interface FdkPagingScopeBuilder<T : Any> : FdkPagingSlotsBuilder {
     /** Content for each loaded item, given its index and value. */
     fun Item(content: @Composable LazyItemScope.(Int, T) -> Unit)
 
-    /** Optional header items emitted before the list content. */
-    fun Prepend(content: LazyListScope.() -> Unit)
+    /** Optional static content emitted above the paged items. Unrelated to
+     * [FdkPagingSlotsBuilder.PrependLoading], which is the paging load state at that end. */
+    fun Header(content: LazyListScope.() -> Unit)
 }
 
 private class PagingScopeBuilderImpl<T : Any> : PagingSlotsBuilderImpl(), FdkPagingScopeBuilder<T> {
     private var item: @Composable LazyItemScope.(Int, T) -> Unit = { _, _ -> }
-    private var prepend: (LazyListScope.() -> Unit)? = null
+    private var header: (LazyListScope.() -> Unit)? = null
 
     override fun Item(content: @Composable LazyItemScope.(Int, T) -> Unit) { item = content }
-    override fun Prepend(content: LazyListScope.() -> Unit) { prepend = content }
+    override fun Header(content: LazyListScope.() -> Unit) { header = content }
 
-    fun build() = PagingScopeImpl(item, prepend, buildSlots())
+    fun build() = PagingScopeImpl(item, header, buildSlots())
 }
 
 /**
@@ -232,28 +278,55 @@ private class PagingScopeBuilderImpl<T : Any> : PagingSlotsBuilderImpl(), FdkPag
  * composition.
  */
 @Stable
-class FdkPagingController internal constructor() {
+class FdkPagingController internal constructor(
+    private val showsRefreshIndicator: Boolean,
+) {
     private var items: LazyPagingItems<*>? = null
+    private var announceRefresh: (() -> Unit)? = null
 
-    internal fun bind(items: LazyPagingItems<*>) { this.items = items }
-
-    internal fun unbind(items: LazyPagingItems<*>) {
-        if (this.items === items) this.items = null
+    internal fun bind(items: LazyPagingItems<*>, announceRefresh: () -> Unit) {
+        this.items = items
+        this.announceRefresh = announceRefresh
     }
 
-    /** Reload the list from the first page. Mirrors [LazyPagingItems.refresh]. */
-    fun refresh() { items?.refresh() }
+    internal fun unbind(items: LazyPagingItems<*>) {
+        if (this.items === items) {
+            this.items = null
+            this.announceRefresh = null
+        }
+    }
+
+    /**
+     * Reload the list from the first page. Mirrors [LazyPagingItems.refresh].
+     *
+     * Raises the container's pull-to-refresh indicator for the duration when the controller was
+     * remembered with `showsRefreshIndicator = true`, and nothing else has taken that flag over.
+     */
+    fun refresh() {
+        if (showsRefreshIndicator) announceRefresh?.invoke()
+        items?.refresh()
+    }
 
     /** Retry the failed load. Mirrors [LazyPagingItems.retry]. */
     fun retry() { items?.retry() }
 }
 
-/** Remembers a [FdkPagingController] for hoisting refresh/retry control out of [PagingContent]. */
+/**
+ * Remembers a [FdkPagingController] for hoisting refresh/retry control out of [PagingContent].
+ *
+ * @param showsRefreshIndicator whether [FdkPagingController.refresh] raises the container's
+ *   pull-to-refresh indicator. Off by default: a reload that the user did not ask for has no business
+ *   animating, and loaded items stay on screen throughout either way. Turn it on for a refresh the
+ *   user *did* ask for — a toolbar button — which would otherwise look like it did nothing. It has no
+ *   effect where the call site owns the gesture through `isRefreshing`, or on a reload the SDK never
+ *   sees, such as a [PagingSource][androidx.paging.PagingSource] invalidating itself.
+ */
 @Composable
-fun rememberPagingController(): FdkPagingController = remember { FdkPagingController() }
+fun rememberPagingController(showsRefreshIndicator: Boolean = false): FdkPagingController =
+    remember(showsRefreshIndicator) { FdkPagingController(showsRefreshIndicator) }
 
 private class PagingScopeImpl<T : Any>(
     val item: @Composable LazyItemScope.(Int, T) -> Unit,
-    val prepend: (LazyListScope.() -> Unit)?,
+    val header: (LazyListScope.() -> Unit)?,
     val slots: PagingSlots,
 )
