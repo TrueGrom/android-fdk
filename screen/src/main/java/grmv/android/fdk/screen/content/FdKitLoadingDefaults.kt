@@ -22,9 +22,9 @@ import grmv.android.fdk.state.RemoteData
  *
  * Carries the [Loading] indicator and [Error] presentation reused by every screen building block
  * that renders an indeterminate load or a failed fetch — `Fetchable` ([RemoteData] content) and,
- * via `PagingDefaults`, `PagingContent`. Provide a custom instance once (high in the composition)
- * via [ProvideLoadingDefaults] to skin them with your design system; individual call-site slots
- * still override per usage.
+ * via `PagingDefaults`, `PagingContent` and the paged grids. Provide a custom instance once (high in
+ * the composition) via [ProvideLoadingDefaults] to skin them with your design system; individual
+ * call-site slots still override per usage.
  *
  * Both slots are unscoped: callers place them in whatever layout they need (full-screen box, lazy
  * item, …).

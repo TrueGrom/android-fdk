@@ -124,7 +124,7 @@ Wire app-wide screen theming once, just inside the app theme:
 AppTheme {
     FdkScreenDefaults(
         // each param defaults to the current Local*Defaults; override any subset:
-        pagingDefaults = AppPagingDefaults,          // loaders for PagingContent
+        pagingDefaults = AppPagingDefaults,          // loaders for paged lists AND grids
         errorEffectsDefaults = AppErrorDefaults,     // Throwable -> ErrorMessage mapping + dialog
         contentTransitions = FdkFadeContentTransitions, // opt in to animated state swaps
         // contentPaddingDefaults, loadingDefaults, topBarDefaults, refreshDefaults,
@@ -149,9 +149,10 @@ animation. `FdkFadeContentTransitions` cross-fades both.
 Implement `FdkContentTransitions` to supply your own specs. `transform()` returns a
 `ContentTransform?` (as for `AnimatedContent`) and drives `Fetchable`; `itemTransitions()` returns an
 `FdkItemTransitions?` — `fadeIn`/`fadeOut`/`placement` specs fed to `Modifier.animateItem` — and
-drives `PagingContent`. `null` from either means "no animation". Install it app-wide through
-`FdkScreenDefaults(contentTransitions = ...)`, or scope a subtree with
-`ProvideContentTransitions(...)`.
+drives `PagingContent` and the paged grids. `null` from either means "no animation". Install it
+app-wide through `FdkScreenDefaults(contentTransitions = ...)`, or scope a subtree with
+`ProvideContentTransitions(...)`. A per-call `transition { }` runs inside each emitted slot, so
+whatever it `remember`s lives and dies with that slot.
 
 Two behaviours worth knowing. `Fetchable` does not animate container size: while both slots are
 present the container is sized to their union, so a large slot fading out holds it open until the
@@ -526,8 +527,8 @@ Choosing an error operator:
 | Raw `Result.onFailure` / `fold` | avoid — both hand `CancellationException` to the lambda; use `onError` (plus `onSuccess` when both branches are needed) |
 
 All of these rethrow `CancellationException` — never hand-roll `rethrowCancellation()` around them.
-Paging screens are a separate case: `PagingContent` renders loading/error/empty itself — no
-`RemoteData`, `Fetchable`, or `RefreshOwner` involved.
+Paging screens are a separate case: `PagingContent`, `PagingGridContent` and `pagingItems` render
+loading/error/empty themselves — no `RemoteData`, `Fetchable`, or `RefreshOwner` involved.
 
 ### Exposure discipline
 
@@ -625,13 +626,85 @@ Building blocks:
   `RemoteData` variant, so a new `Fetched` payload recomposes without re-running it.
 - **`PagingContent`** — `Flow<PagingData<T>>.PagingContent(itemKey = { it.id.toString() }) { Item { i, x -> ... } }`
   (`itemKey` is `(T) -> String` — convert non-string ids). Pull-to-refresh built in; slots
-  `Item/Loading/Error/Empty/AppendLoading/AppendError/Prepend`, of which `Loading/Error/
-  AppendLoading/AppendError` fall back to `LocalPagingDefaults` (`Empty` and `Prepend` have no
-  default — render nothing unless you supply them). Programmatic refresh:
+  `Item/Loading/EmptyError/RefreshError/Empty/PrependLoading/PrependError/AppendLoading/AppendError/Header`, of which everything but
+  `Item`, `Empty` and `Header` falls back to `LocalPagingDefaults` (`Empty` and `Header` have no
+  default — render nothing unless you supply them). All three error slots receive the failing
+  `Throwable` alongside `retry` (`EmptyError(e, retry)`, `RefreshError(e, retry)`, `AppendError(e, retry)`) — word it through
+  `ErrorEffectsDefaults.errorMessage` — the mapper behind the error dialogs and snackbars — and word
+  `LoadingDefaults.Error` from the same place, so one failure reads the same on a paged screen and
+  on the screen beside it. `retry` stays `() -> Unit`: paging
+  retries through `LazyPagingItems.retry()`. The value is re-read inside the slot's composition, so
+  a second failure of a different kind is worded as itself. Programmatic refresh:
   `rememberPagingController()` passed as `controller`, then `controller.refresh()`/`retry()`.
-  `transition { }` (returns `FdkItemTransitions?`) overrides the load-state slot animation for one
+  `rememberPagingController(showsRefreshIndicator = true)` makes `refresh()` raise the pull indicator
+  for its duration — off by default, because a reload nobody asked for should not animate; turn it on
+  for a toolbar button, which otherwise looks inert now that loaded items are never replaced. Hoist
+  `state` (`LazyListState`, `LazyGridState` for the grid) to drive the scroll yourself.
+  Pass `isRefreshing` + `onRefresh` to own the pull gesture when it reloads more than the paged
+  content (a header, a summary): the indicator then follows your flag and `onRefresh` replaces the
+  built-in `refresh()`, so reload the paging itself from it — via `controller`. Unset (the default),
+  the container owns both. `transition { }` (returns `FdkItemTransitions?`) overrides the load-state slot animation for one
   call site — `transition { null }` opts out; unset, it follows `LocalContentTransitions`. Loaded
   items are never animated — only the load-state slots.
+- **Loaded items are never replaced by a load-state slot.** `Loading` and `EmptyError` are the
+  *empty-state* presentations: they render only while `itemCount == 0`. A `PagingSource` over a local
+  store is invalidated by writes the screen never asked about, and every invalidation drives refresh
+  back through `Loading` — branching on the load state alone would tear the content off the screen on
+  each one. A refresh that *fails* over loaded items surfaces as the `RefreshError` banner instead,
+  emitted first (after `Prepend`, full-span in a grid, wrapping its content) and defaulting to the
+  append error's presentation, so an app that has skinned `AppendError` gets a matching banner
+  without doing anything. Override `PagingDefaults.RefreshError` to tell the two apart. While the
+  banner is up it is the only error surface — `AppendError` is suppressed, because `retry()` restarts
+  every failed load state at once and two messages would report one outcome.
+- **Migrating an existing `PagingDefaults`** (this release breaks it twice, deliberately): the slot
+  receiver changes `LazyItemScope` -> `FdkPagingSlotScope`, and both error slots gain the failing
+  throwable, the empty-state one is renamed, and the static-header DSL slot `Prepend` becomes
+  `Header` (freed up for `PrependLoading`/`PrependError`, the real paging load states at that end,
+  both of which default to their append twins) — `Error(retry)` -> `EmptyError(e, retry)`,
+  `AppendError(e, retry)`. Both refresh slots fire off the same failed refresh and are told apart only
+  by whether items are on screen, so the names say when they render, not what failed. Slot bodies are
+  unaffected: the new scope
+  carries `fillParentMax*` and `animateItem`, so only the `override` signatures change.
+  `RefreshError` is additive and has a default body, so it breaks nothing. The containers also gained
+  `isRefreshing`/`onRefresh` after `state`; both default to `null`, so at source level only positional
+  callers that passed `content` without the trailing-lambda form need touching — but the composable's
+  descriptor changed, so consumers recompile against the new artifact either way (as they must for
+  the slot changes above). Tapping retry on a `RefreshError`
+  banner dismisses it and starts the reload silently — announcing it would mean a loader over loaded
+  content, which is the thing being fixed. The DSL
+  builder interfaces are now `Fdk`-prefixed (`FdkPagingScopeBuilder`, `FdkPagingGridScopeBuilder`,
+  `FdkPagingSlotsBuilder`); `PagingDefaults` itself keeps its name, like the rest of the defaults
+  family. An app that implements only `LoadingDefaults` needs no change at all — the paging fallback
+  now delegates its error slots there, which also means raw `e.message` reaches the default paged
+  error surface exactly as it already did on the non-paged one.
+- **Paged grids** — same states, laid out as tiles, through the *same* `LocalPagingDefaults`: a
+  grid is not a second place to word a failure. Two shapes:
+  - `Flow<PagingData<T>>.PagingGridContent(columns = GridCells.Adaptive(104.dp), itemKey = { ... })`
+    with the same slot DSL — the container twin of `PagingContent` over a `LazyVerticalGrid`,
+    pull-to-refresh included.
+    `verticalArrangement`/`horizontalArrangement` are per call; `contentPadding` defaults to the
+    app-wide `ContentPaddingDefaults` and is overridable per call.
+  - `LazyGridScope.pagingItems(items, itemKey = { ... }) { Item { i, x -> ... } }` — the same
+    states emitted into a grid the screen **already owns**, for a paged section sharing one
+    `LazyVerticalGrid` with a header or a summary card. Takes collected `LazyPagingItems` (the
+    caller calls `collectAsLazyPagingItems()`), and the caller's own `isRefreshing` if it drives
+    pull-to-refresh itself. The container is a thin wrapper over this.
+
+  Load-state slots are emitted full-span; `Item` keeps `LazyGridItemScope`, so
+  `Modifier.animateItem()` still works and a removed tile lets the rest close up. Slot DSL is shared
+  with the list (`FdkPagingSlotsBuilder`) — only `Item`/`Prepend` differ, since only they speak the
+  layout.
+
+  `LazyListScope.pagingItems(...)` is the list twin of the same extension, for a paged section
+  inside a `LazyColumn` the screen owns; `PagingContent` is a thin wrapper over it.
+- **`FdkPagingSlotScope`** — the receiver of every paging load-state slot, in `PagingDefaults` and
+  in the per-call DSL alike. `LazyItemScope` and `LazyGridItemScope` are unrelated types and only
+  the first has `fillParentMax*`, so the slots hang off this intersection instead: `fillParentMaxSize/
+  Width/Height` and `animateItem`. In a list every member is the `LazyItemScope` original. In a grid
+  `fillParentMaxHeight` needs the viewport, which a lazy grid never hands its items —
+  `PagingGridContent` measures it; `pagingItems` takes it as `slotViewport` (build one with
+  `BoxWithConstraintsScope.pagingSlotViewport(contentPadding)`) and, unset, lets the slot wrap its
+  content, which is what a *section* wants anyway.
 - **Snackbars are UI-only**: ViewModels never hold a `SnackbarManager`; they emit events whose type
   implements `SnackbarEvent` (declares its snackbar via the `SnackbarBuilder` DSL).
   `snackbar.ConsumeEvents(viewModel)` consumes only `SnackbarEvent`s; everything else stays pending
