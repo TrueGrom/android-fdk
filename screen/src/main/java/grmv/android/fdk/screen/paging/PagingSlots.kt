@@ -193,7 +193,9 @@ internal fun resolveSlotTransitions(slots: PagingSlots): FdkItemTransitions? {
  *
  * The full-viewport slots are the empty-state ones: loaded items are never replaced by a loader or
  * an error (see [expand]), and a refresh that fails over them is reported by the
- * [FdkPagingSlotsBuilder.RefreshError] banner emitted ahead of them.
+ * [FdkPagingSlotsBuilder.RefreshError] banner emitted ahead of them. Being ahead of the rows, it
+ * would land above the viewport of a layout resting at its top; [KeepRefreshErrorInView] is what
+ * brings it into view there.
  *
  * @param isRefreshing suppresses the full-viewport loader while a pull-to-refresh is in flight, so
  *   it does not flash on top of the pull indicator.
@@ -223,8 +225,9 @@ internal fun <T : Any> emitPagingSlots(
             // the only error surface: two more would report one outcome and each would silently fix
             // the others'.
             val refreshFailed = items.refreshErrorOrNull() != null
-            items.ifRefreshError {
-                // Reached only with items on screen: with none, expand() takes the `error` branch.
+            items.ifRefreshErrorBanner {
+                // Inserted above the first loaded row, which a lazy layout keeps pinned by key; see
+                // KeepRefreshErrorInView for how the banner is brought into view at the top.
                 val emitted = items.refreshErrorOrNull()
                 slot("paging_slot_refresh_error", true) {
                     val e = items.refreshErrorOrNull() ?: emitted
