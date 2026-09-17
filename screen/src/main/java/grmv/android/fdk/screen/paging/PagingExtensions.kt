@@ -46,9 +46,20 @@ internal inline fun <T : Any> LazyPagingItems<T>.ifPrependPageLoading(block: () 
     }
 }
 
-/** Invokes [block] when the refresh load state is [Error]. */
-internal inline fun <T : Any> LazyPagingItems<T>.ifRefreshError(block: () -> Unit) {
-    if (loadState.refresh is Error) {
+/**
+ * Whether the refresh-error banner is emitted ahead of the loaded items: a failed refresh with items
+ * still on screen. With none, [expand] takes its `error` branch and the empty-state error shows
+ * instead.
+ *
+ * The one definition both the emission and [KeepRefreshErrorInView] read, so the effect cannot
+ * disagree with the slot it is bringing into view.
+ */
+internal fun LazyPagingItems<*>.showsRefreshErrorBanner(): Boolean =
+    itemCount > 0 && loadState.refresh is Error
+
+/** Invokes [block] while [showsRefreshErrorBanner] holds. */
+internal inline fun <T : Any> LazyPagingItems<T>.ifRefreshErrorBanner(block: () -> Unit) {
+    if (showsRefreshErrorBanner()) {
         block.invoke()
     }
 }

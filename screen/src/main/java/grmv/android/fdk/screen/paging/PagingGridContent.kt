@@ -92,6 +92,7 @@ fun <T : Any> Flow<PagingData<T>>.PagingGridContent(
     content: FdkPagingGridScopeBuilder<T>.() -> Unit,
 ) {
     PagedPullToRefresh(controller, isRefreshing, onRefresh) { items, refreshing ->
+        KeepRefreshErrorInView(state, items)
         // A lazy grid gives its items no viewport height (they are measured with an infinite main
         // axis), so a full-viewport slot has nothing to fill. Measuring the grid's own box here is
         // what lets `fillParentMaxSize()` in a slot mean the same thing it means in a list.
@@ -139,6 +140,10 @@ fun <T : Any> Flow<PagingData<T>>.PagingGridContent(
  * Pull-to-refresh is the caller's: this emits items, it does not wrap them in a gesture. A screen
  * that pulls to refresh its whole content passes its own flag as [isRefreshing] so the full-viewport
  * loader does not flash on top of the pull indicator.
+ *
+ * The scroll state is the caller's as well: call [KeepRefreshErrorInView] beside the grid with its
+ * state and these [items], so a refresh-error banner appearing over a grid at its top is not
+ * inserted above the viewport.
  *
  * @param items the collected paging items — `flow.collectAsLazyPagingItems()` in the caller, since
  *   this is not a composable.

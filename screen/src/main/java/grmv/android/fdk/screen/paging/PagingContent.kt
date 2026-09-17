@@ -78,7 +78,9 @@ import kotlinx.coroutines.flow.Flow
  * local store is invalidated by writes this screen never asked about, and each invalidation drives
  * refresh back through `Loading` — a full-viewport loader on every one of them would make the list
  * flicker. A refresh that *fails* over loaded items is reported by [FdkPagingSlotsBuilder.RefreshError]
- * instead: a banner emitted ahead of the items, defaulting to the append error's presentation.
+ * instead: a banner emitted ahead of the items, defaulting to the append error's presentation. When
+ * it appears while the list rests at its top, the list moves to show it ([KeepRefreshErrorInView]);
+ * a list scrolled into its content stays where it is.
  *
  * The load-state slot animation resolves separately:
  * [FdkPagingSlotsBuilder.transition] > [LocalContentTransitions] > no animation. Loaded items are
@@ -159,6 +161,7 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
     content: FdkPagingScopeBuilder<T>.() -> Unit,
 ) {
     PagedPullToRefresh(controller, isRefreshing, onRefresh) { items, refreshing ->
+        KeepRefreshErrorInView(state, items)
         LazyColumn(
             state = state,
             contentPadding = contentPadding,
@@ -197,6 +200,10 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
  * Pull-to-refresh is the caller's: this emits items, it does not wrap them in a gesture. A screen
  * that pulls to refresh its whole content passes its own flag as [isRefreshing] so the full-viewport
  * loading slot does not flash on top of the pull indicator.
+ *
+ * The scroll state is the caller's as well: call [KeepRefreshErrorInView] beside the list with its
+ * state and these [items], so a refresh-error banner appearing over a list at its top is not
+ * inserted above the viewport.
  *
  * @param items the collected paging items — `flow.collectAsLazyPagingItems()` in the caller, since
  *   this is not a composable.
