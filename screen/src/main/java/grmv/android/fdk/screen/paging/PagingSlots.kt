@@ -184,6 +184,12 @@ internal fun resolveSlotTransitions(slots: PagingSlots): FdkItemTransitions? {
 }
 
 /**
+ * Lazy item key of the [FdkPagingSlotsBuilder.RefreshError] banner; [KeepRefreshErrorInView] looks
+ * it up among the visible items.
+ */
+internal const val REFRESH_ERROR_SLOT_KEY = "paging_slot_refresh_error"
+
+/**
  * Emits the load-state slots around [loadedItems] in the order a paged layout needs them, through
  * the layout-specific [slot] emitter.
  *
@@ -229,7 +235,7 @@ internal fun <T : Any> emitPagingSlots(
                 // Inserted above the first loaded row, which a lazy layout keeps pinned by key; see
                 // KeepRefreshErrorInView for how the banner is brought into view at the top.
                 val emitted = items.refreshErrorOrNull()
-                slot("paging_slot_refresh_error", true) {
+                slot(REFRESH_ERROR_SLOT_KEY, true) {
                     val e = items.refreshErrorOrNull() ?: emitted
                     if (e != null) slots.refreshError(this, e) { items.retry() }
                 }
