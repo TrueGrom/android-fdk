@@ -12,8 +12,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarColors
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import grmv.android.fdk.screen.R
 import grmv.android.fdk.screen.ScaffoldSettings
 
 /**
@@ -59,12 +61,21 @@ fun ScaffoldSettings.FdKitTopBarTextTitle(
     )
 }
 
-/** Default back-navigation icon: an [Icons.AutoMirrored.Filled.ArrowBack] button, or nothing when [onClick] is null. */
+/**
+ * Default back-navigation icon: an [Icons.AutoMirrored.Filled.ArrowBack] button, or nothing when
+ * [onClick] is null. Labelled with `R.string.fdk_action_navigate_back`, so TalkBack does not announce
+ * an unlabelled button. An app rewords it by declaring a string of the same name in every locale
+ * the SDK ships (default, `ru`, `el`) — resources merge per qualifier, so a locale left out keeps
+ * the SDK's wording.
+ */
 @Composable
 internal fun BackNavigationIcon(onClick: (() -> Unit)?) {
     if (onClick != null) {
         IconButton(onClick = onClick) {
-            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.fdk_action_navigate_back),
+            )
         }
     }
 }

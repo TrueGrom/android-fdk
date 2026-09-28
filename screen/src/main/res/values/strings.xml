@@ -3,4 +3,5 @@
     <string name="fdk_error_unexpected">Unexpected error</string>
     <string name="fdk_error_something_went_wrong">Something went wrong…</string>
     <string name="fdk_action_retry">Retry</string>
+    <string name="fdk_action_navigate_back">Back</string>
 </resources>
