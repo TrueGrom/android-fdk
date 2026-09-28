@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment.Horizontal
 import androidx.compose.ui.unit.dp
 import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
+import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import grmv.android.fdk.screen.LocalContentPaddingDefaults
 import grmv.android.fdk.screen.content.LocalContentTransitions
@@ -146,6 +147,7 @@ import kotlinx.coroutines.flow.Flow
  *   (through a [FdkPagingController], say) — nothing else will. On its own it keeps the built-in
  *   flag, which still retracts the indicator once that reload settles; with [isRefreshing] it hands
  *   the whole gesture over.
+ * @param itemContentType the kind of each loaded item; see [pagingItems].
  * @param content the slot DSL describing item, load-state and header presentations for this list.
  */
 @Composable
@@ -158,6 +160,7 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
     state: LazyListState = rememberLazyListState(),
     isRefreshing: Boolean? = null,
     onRefresh: (() -> Unit)? = null,
+    itemContentType: ((T) -> Any?)? = null,
     content: FdkPagingScopeBuilder<T>.() -> Unit,
 ) {
     PagedPullToRefresh(controller, isRefreshing, onRefresh) { items, refreshing ->
@@ -172,6 +175,7 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
                 items = items,
                 itemKey = itemKey,
                 isRefreshing = refreshing,
+                itemContentType = itemContentType,
                 content = content,
             )
         }
@@ -210,12 +214,16 @@ fun <T : Any> Flow<PagingData<T>>.PagingContent(
  * @param itemKey stable key for each item, used for efficient updates and for `animateItem`.
  * @param isRefreshing `true` while the caller's own pull-to-refresh is in flight; suppresses the
  *   full-viewport loading slot for its duration.
+ * @param itemContentType the kind of each loaded item, so a list mixing rows the pager produces
+ *   (a date divider from `PagingData.insertSeparators`) with ordinary ones reuses a row's
+ *   composition only for another row of its kind. `null` (the default) leaves every item untyped.
  * @param content the slot DSL describing item, load-state and header presentations.
  */
 fun <T : Any> LazyListScope.pagingItems(
     items: LazyPagingItems<T>,
     itemKey: (T) -> String,
     isRefreshing: Boolean = false,
+    itemContentType: ((T) -> Any?)? = null,
     content: FdkPagingScopeBuilder<T>.() -> Unit,
 ) {
     val scope = PagingScopeBuilderImpl<T>().apply(content).build()
@@ -233,6 +241,7 @@ fun <T : Any> LazyListScope.pagingItems(
             items(
                 count = items.itemCount,
                 key = items.itemKey(itemKey),
+                contentType = items.itemContentType(itemContentType),
             ) { index ->
                 items[index]?.let { element ->
                     scope.item(this, index, element)

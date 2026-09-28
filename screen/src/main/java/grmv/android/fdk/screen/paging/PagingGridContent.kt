@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridItemScope
+import androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isFinite
 import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
+import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import grmv.android.fdk.screen.LocalContentPaddingDefaults
 import kotlinx.coroutines.flow.Flow
@@ -76,6 +78,8 @@ import kotlinx.coroutines.flow.Flow
  *   (through a [FdkPagingController], say) — nothing else will. On its own it keeps the built-in
  *   flag, which still retracts the indicator once that reload settles; with [isRefreshing] it hands
  *   the whole gesture over.
+ * @param itemSpan how many cells a loaded item takes; see [pagingItems].
+ * @param itemContentType the kind of each loaded item; see [pagingItems].
  * @param content the slot DSL describing item, load-state and header presentations for this grid.
  */
 @Composable
@@ -89,6 +93,8 @@ fun <T : Any> Flow<PagingData<T>>.PagingGridContent(
     state: LazyGridState = rememberLazyGridState(),
     isRefreshing: Boolean? = null,
     onRefresh: (() -> Unit)? = null,
+    itemSpan: (LazyGridItemSpanScope.(T) -> GridItemSpan)? = null,
+    itemContentType: ((T) -> Any?)? = null,
     content: FdkPagingGridScopeBuilder<T>.() -> Unit,
 ) {
     PagedPullToRefresh(controller, isRefreshing, onRefresh) { items, refreshing ->
@@ -110,6 +116,8 @@ fun <T : Any> Flow<PagingData<T>>.PagingGridContent(
                     itemKey = itemKey,
                     isRefreshing = refreshing,
                     slotViewport = slotViewport,
+                    itemSpan = itemSpan,
+                    itemContentType = itemContentType,
                     content = content,
                 )
             }
@@ -135,7 +143,8 @@ fun <T : Any> Flow<PagingData<T>>.PagingGridContent(
  * }
  * ```
  *
- * The load-state slots are emitted full-span; loaded items take one cell each.
+ * The load-state slots are emitted full-span; loaded items take one cell each unless [itemSpan]
+ * says otherwise.
  *
  * Pull-to-refresh is the caller's: this emits items, it does not wrap them in a gesture. A screen
  * that pulls to refresh its whole content passes its own flag as [isRefreshing] so the full-viewport
@@ -156,6 +165,13 @@ fun <T : Any> Flow<PagingData<T>>.PagingGridContent(
  *   whatever sits above it off screen. Pass [pagingSlotViewport] (from a `BoxWithConstraints`
  *   around the grid) when the paged content really is the screen. Width needs no such help: a full-span item is
  *   already measured against the grid's finite width.
+ * @param itemSpan how many cells a loaded item takes; `null` (the default) gives each one cell.
+ *   This is what lets a row the pager itself produces — a date divider from
+ *   `PagingData.insertSeparators` — span the grid between the items around it, which a header
+ *   emitted with `item(span = …)` outside this call cannot do: that one sits before or after the
+ *   whole paged block. A placeholder is not loaded yet, so it always takes one cell.
+ * @param itemContentType the kind of each loaded item, so a grid mixing dividers and tiles reuses
+ *   a tile's composition only for another tile. `null` (the default) leaves every item untyped.
  * @param content the slot DSL describing item, load-state and header presentations.
  */
 fun <T : Any> LazyGridScope.pagingItems(
@@ -163,6 +179,8 @@ fun <T : Any> LazyGridScope.pagingItems(
     itemKey: (T) -> String,
     isRefreshing: Boolean = false,
     slotViewport: DpSize = DpSize.Unspecified,
+    itemSpan: (LazyGridItemSpanScope.(T) -> GridItemSpan)? = null,
+    itemContentType: ((T) -> Any?)? = null,
     content: FdkPagingGridScopeBuilder<T>.() -> Unit,
 ) {
     val scope = PagingGridScopeBuilderImpl<T>().apply(content).build()
@@ -185,6 +203,12 @@ fun <T : Any> LazyGridScope.pagingItems(
             items(
                 count = items.itemCount,
                 key = items.itemKey(itemKey),
+                // `peek`, not `get`: a span is asked for while laying out, and `get` would count as
+                // an access and trigger the next page's load from measurement.
+                span = itemSpan?.let { spanOf ->
+                    { index -> items.peek(index)?.let { spanOf(it) } ?: GridItemSpan(1) }
+                },
+                contentType = items.itemContentType(itemContentType),
             ) { index ->
                 items[index]?.let { element ->
                     scope.item(this, index, element)
@@ -244,9 +268,10 @@ private fun Dp.minusPadding(padding: Dp): Dp =
  */
 interface FdkPagingGridScopeBuilder<T : Any> : FdkPagingSlotsBuilder {
     /**
-     * Content for each loaded item, given its index and value. Occupies one cell, and keeps
-     * `LazyGridItemScope` — so `Modifier.animateItem()` is available, and a tile leaving the grid
-     * lets the ones behind it close up rather than jumping.
+     * Content for each loaded item, given its index and value. Occupies one cell unless the
+     * call's `itemSpan` says otherwise, and keeps `LazyGridItemScope` — so `Modifier.animateItem()`
+     * is available, and a tile leaving the grid lets the ones behind it close up rather than
+     * jumping.
      */
     fun Item(content: @Composable LazyGridItemScope.(Int, T) -> Unit)
 

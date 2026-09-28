@@ -692,11 +692,20 @@ Building blocks:
 
   Load-state slots are emitted full-span; `Item` keeps `LazyGridItemScope`, so
   `Modifier.animateItem()` still works and a removed tile lets the rest close up. Slot DSL is shared
-  with the list (`FdkPagingSlotsBuilder`) — only `Item`/`Prepend` differ, since only they speak the
+  with the list (`FdkPagingSlotsBuilder`) — only `Item`/`Header` differ, since only they speak the
   layout.
 
   `LazyListScope.pagingItems(...)` is the list twin of the same extension, for a paged section
   inside a `LazyColumn` the screen owns; `PagingContent` is a thin wrapper over it.
+
+  **Rows the pager itself produces** (a date divider from `PagingData.insertSeparators`) are loaded
+  items like any other, so in a grid they take one cell unless the call says otherwise. Pass
+  `itemSpan = { row -> if (row is Divider) GridItemSpan(maxLineSpan) else GridItemSpan(1) }` to
+  `pagingItems`/`PagingGridContent`. A header emitted with `item(span = …)` outside the call cannot
+  stand in: it sits before or after the whole paged block, never between two items. Placeholders
+  always take one cell. `itemContentType = { it::class }` (both layouts) keeps a divider from
+  reusing a tile's composition. Both default to `null`, so existing calls compile unchanged — but
+  the signatures changed, so consumers recompile against the new artifact.
 - **`FdkPagingSlotScope`** — the receiver of every paging load-state slot, in `PagingDefaults` and
   in the per-call DSL alike. `LazyItemScope` and `LazyGridItemScope` are unrelated types and only
   the first has `fillParentMax*`, so the slots hang off this intersection instead: `fillParentMaxSize/
