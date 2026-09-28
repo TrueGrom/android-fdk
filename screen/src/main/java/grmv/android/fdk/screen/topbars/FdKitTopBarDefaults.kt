@@ -36,7 +36,13 @@ interface TopBarDefaults {
     /** Expanded height for the single-row presets ([FdKitTopBarTextTitle], [FdKitFeatureTopBar]). */
     val expandedHeight: Dp
 
-    /** Leading back-navigation icon; renders nothing when [onNavigateBack] is null. */
+    /**
+     * Leading back-navigation icon; renders nothing when [onNavigateBack] is null.
+     *
+     * The default arrow is labelled for TalkBack with `R.string.fdk_action_navigate_back`. An
+     * override draws its own icon and must set its own `contentDescription`, or the button is
+     * announced unlabelled.
+     */
     @Composable
     fun NavigationIcon(onNavigateBack: (() -> Unit)?)
 

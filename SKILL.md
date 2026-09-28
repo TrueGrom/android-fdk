@@ -704,8 +704,10 @@ Building blocks:
   `pagingItems`/`PagingGridContent`. A header emitted with `item(span = …)` outside the call cannot
   stand in: it sits before or after the whole paged block, never between two items. Placeholders
   always take one cell. `itemContentType = { it::class }` (both layouts) keeps a divider from
-  reusing a tile's composition. Both default to `null`, so existing calls compile unchanged — but
-  the signatures changed, so consumers recompile against the new artifact.
+  reusing a tile's composition. Both default to `null` and sit just before `content`, so calls
+  passing `content` as a trailing lambda (or by name) compile unchanged — one passing it
+  positionally needs touching — but the signatures changed, so consumers recompile against the
+  new artifact.
 - **`FdkPagingSlotScope`** — the receiver of every paging load-state slot, in `PagingDefaults` and
   in the per-call DSL alike. `LazyItemScope` and `LazyGridItemScope` are unrelated types and only
   the first has `fillParentMax*`, so the slots hang off this intersection instead: `fillParentMaxSize/
@@ -725,7 +727,11 @@ Building blocks:
   `onNavigateBack: (() -> Unit)?` — the callback param is `onNavigateBack`, not `onBack`; pass
   `navigationIcon` to replace the icon entirely), `FdKitFeatureTopBar` (no back default —
   `navigationIcon` defaults to `TopBarDefaults.FeatureNavigationIcon` for an avatar/menu). All read
-  `LocalTopBarDefaults` and wire `scrollBehavior` from `ScaffoldSettings`.
+  `LocalTopBarDefaults` and wire `scrollBehavior` from `ScaffoldSettings`. The default back arrow
+  is labelled for TalkBack with `R.string.fdk_action_navigate_back` ("Back"; ru/el shipped) —
+  declare a string of that name in the app to reword it, no `TopBarDefaults` override needed. Declare
+  it in every locale the SDK ships (default, `ru`, `el`): resources merge per qualifier, so a locale
+  the app leaves out keeps the SDK's wording.
 - **ui-kit**: `FdKitCenterBox` (Box- and Column-scoped centering), `currentLocale`, and
   locale-aware date formatting in composables:
   `localizedFormat(date) { ddMMMyyyy() }` — recomposes on device-language change.

@@ -3,4 +3,5 @@
     <string name="fdk_error_unexpected">Μη αναμενόμενο σφάλμα</string>
     <string name="fdk_error_something_went_wrong">Κάτι πήγε στραβά…</string>
     <string name="fdk_action_retry">Επανάληψη</string>
+    <string name="fdk_action_navigate_back">Πίσω</string>
 </resources>
