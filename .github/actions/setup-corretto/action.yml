@@ -1,0 +1,24 @@
+name: Set up Corretto
+description: Installs the pinned Amazon Corretto JDK.
+
+runs:
+  using: composite
+  steps:
+    - name: Download pinned Corretto
+      shell: bash
+      env:
+        CORRETTO_SHA256: 8785082c2fb999c024c8821e4a7c5391bda28f1667cceadafd78e2965b7669d2
+      run: |
+        if [ "$RUNNER_OS-$RUNNER_ARCH" != "Linux-X64" ]; then
+          echo "::error::setup-corretto supports Linux X64 runners only, got $RUNNER_OS-$RUNNER_ARCH"
+          exit 1
+        fi
+        url=$(sed -n 's/^toolchainUrl\.LINUX\.X86_64=//p' gradle/gradle-daemon-jvm.properties | sed 's/\\:/:/g')
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/corretto.tar.gz" "$url"
+        echo "$CORRETTO_SHA256  $RUNNER_TEMP/corretto.tar.gz" | sha256sum -c -
+
+    - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      with:
+        distribution: jdkfile
+        jdkFile: ${{ runner.temp }}/corretto.tar.gz
+        java-version: 21

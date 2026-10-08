@@ -56,6 +56,7 @@ class FdkPublishConventionPlugin : Plugin<Project> {
                         developer {
                             id.set("truegrom")
                             name.set("Roman Gromov")
+                            email.set("truegrom@gmail.com")
                         }
                     }
                     scm {
