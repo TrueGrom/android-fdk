@@ -22,6 +22,12 @@ import java.io.IOException
  * fun bindHttpRetryConfig(impl: MyRetryConfig): HttpRetryConfig
  * ```
  *
+ * A replay re-sends the request as the first attempt built it: the URL — including the base URL
+ * from [HttpConfigProvider.getBaseUrl] — and the default headers are not resolved again. To move a
+ * failed request to another host, issue it again yourself. Do not reach for Ktor's retry hooks:
+ * a per-request `retry { }` swaps these rules for Ktor's defaults on that request, and installing
+ * `HttpRequestRetry` yourself while [maxRetries] is `0` retries every method, `POST` included.
+ *
  * @property maxRetries Maximum retry attempts per request. Default `0` — the plugin is not
  *   installed at all and every request fails on its first attempt. Raising it buys Ktor's
  *   `exponentialDelay()`: three attempts sleep roughly 1s, 2s and 4s plus jitter, so a failure the
