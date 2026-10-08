@@ -75,9 +75,10 @@ dependencies {
 
 ### Snapshots
 
-Every push to `master` publishes a `-SNAPSHOT` build to the Central Portal snapshot repository
-(the current version is shown in the *snapshot* badge above). To use it, add the snapshot
-repository and pin the snapshot version:
+Unreleased changes are published on demand as a `-SNAPSHOT` build of the next patch version
+(after `v1.2.0` it is `1.2.1-SNAPSHOT`) to the Central Portal snapshot repository; the latest one
+is shown in the *snapshot* badge above. To use one, add the snapshot repository
+and pin the snapshot version:
 
 ```kotlin
 // settings.gradle.kts
