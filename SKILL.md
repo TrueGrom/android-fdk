@@ -75,6 +75,13 @@ class AppHttpConfig @Inject constructor() : HttpConfigProvider {
 }
 ```
 
+`getBaseUrl()` is called for every request, so it may return a different URL over time and the next
+request picks it up; keep it cheap and non-blocking, and read thread-safe state (requests run in
+parallel). An automatic retry does not call it again: a replay goes to the first attempt's URL. To
+move a failed request to another host, issue it again yourself. Do not reach for Ktor's retry hooks:
+a per-request `retry { }` swaps the SDK's retry rules for Ktor's defaults on that request, and
+installing `HttpRequestRetry` yourself while `maxRetries` is `0` retries every method, `POST` included.
+
 ### Optional Hilt bindings — tuning
 
 `HttpTimeoutConfig`, `HttpJsonConfig`, `HttpRetryConfig`, and `CryptoConfig` are optional. Bind an
@@ -105,6 +112,21 @@ class AppRetryConfig @Inject constructor(
     override val maxRetries = 3
     override val retryableMethods = setOf(HttpMethod.Get, HttpMethod.Head)
     override fun shouldRetry(context: HttpRetryContext) = connectivity.isOnline
+}
+```
+
+**Per-request timeouts.** `HttpTimeoutConfig` sets the client-wide values. To narrow a single
+request, install Ktor's `HttpTimeout` on a derived client and set `timeout { }` on that request; the
+derived client shares the `@BaseHttp` engine and its connection pool, and a request without
+`timeout { }` keeps the client-wide values. `requestTimeoutMillis` caps one attempt end to end.
+Create the derived client once (in a `@Singleton`) and reuse it, and keep to a few fixed values:
+each distinct `timeout { }` gets its own OkHttp client inside the engine (Ktor caches up to 10).
+
+```kotlin
+private val client = baseHttp.config { install(HttpTimeout) }
+
+client.get("health") {
+    timeout { connectTimeoutMillis = 1_500 }
 }
 ```
 
@@ -198,6 +220,8 @@ coroutine code:
   There is no `Result`-extension "finally" operator.
 - `result.onAnyResult { ... }` — side effect on success and non-cancellation failure.
 - `throwable.rethrowCancellation()` — call at the top of any `catch (e: Throwable)`.
+- `result.unwrapCancellation()` — rethrows a captured `CancellationException` out of a `Result`
+  produced by code that used plain `runCatching`, before you process it.
 - `dispatcher.context { ... }` — readable `withContext` shorthand.
 
 **Either** — `Either.Left` (error) / `Either.Right` (success) with `fold`, `getOrElse`,
@@ -244,12 +268,13 @@ Rules:
 - Ready-made `FdkResponseErrorDetails` shapes — or implement the interface yourself:
   `FdkCodedError(code, detail)` (application error code), `FdkProblemDetails(...)` (RFC 9457
   `problem+json` — Spring Boot, ASP.NET Core), `FdkRawErrorBody(body, contentType)` (verbatim
-  fallback; its `toString` hides the body). Requires http-error ≥ 0.3.0.
+  fallback; its `toString` hides the body).
 - Map API models to display-ready domain types in the repository — `LocalDate` (formatted via the
   datetime module), value-class ids — before results reach ViewModel state; state never holds raw
   DTO strings.
-- The `@BaseHttp` `HttpClient` already has ContentNegotiation(JSON), retry plugin, base URL, and
-  timeout config; inject it rather than constructing clients.
+- The `@BaseHttp` `HttpClient` already has ContentNegotiation(JSON), base URL, and timeout
+  config — plus the retry plugin once `HttpRetryConfig` enables it; inject it rather than
+  constructing clients.
 
 Carrying the error body across one status (`details` / `detailsAs`):
 
@@ -260,6 +285,37 @@ HttpError.ResponseError(code = 403, cause = e, details = FdkCodedError(body.erro
 // call site — the app names its own accessor
 val HttpError.serverErrorCode: String? get() = detailsAs<FdkCodedError>()?.code
 ```
+
+**Paged endpoints** (`grmv.android.fdk.repository.paging`, Paging 3 comes in via `api`):
+`createPager { page -> PagingResult(...) }` builds a `Pager<Int, T>` over a 1-based page-number API.
+Page `1` is the first load; return `nextPage`/`prevPage` as `null` at either end. The lambda gets
+only the page number, so every load is exactly one server page: set `pageSize` to the server's page
+size and `initialLoadSize` to the same value (its default, `pageSize * 2`, is never requested from
+the API), and they only tune Paging's prefetch and placeholder math. `prefetchDistance` defaults to
+`5`. `enablePlaceholders` defaults to `true`, and then `PagingResult.after`/`before` must be real
+item counts — pass `enablePlaceholders = false` (and `0` for both) when the API has no totals. A throw
+from the page lambda becomes the paging error (cancellation excepted), so build it on `http { }`
+and the mapped `HttpError` reaches the paging error slots as their `Throwable`.
+
+```kotlin
+fun feed(): Flow<PagingData<Post>> = createPager(
+    pageSize = 20,              // the server's page size
+    initialLoadSize = 20,
+    enablePlaceholders = false,
+) { page ->
+    val body: PostPage = http { client.get("posts") { parameter("page", page) }.body() }
+    PagingResult(
+        items = body.items.map { it.toDomain() },
+        nextPage = if (body.hasMore) page + 1 else null,
+        prevPage = if (page > 1) page - 1 else null,
+        after = 0,
+        before = 0,
+    )
+}.flow
+```
+
+Cache the flow in the ViewModel (`.cachedIn(viewModelScope)`) so configuration changes do not
+reload it; the screen side is `PagingContent` / `PagingGridContent` (section 6).
 
 ## 5. State management (`viewmodel`, `state`) — the core of FdKit
 
@@ -422,9 +478,12 @@ delegation and bind scope + work in `init`:
 
 ```kotlin
 @HiltViewModel
-class FeedViewModel @Inject constructor(
-    private val refresher: RefreshController = RefreshController(),
+class FeedViewModel private constructor(
+    private val refresher: RefreshController,
+    private val repository: FeedRepository,
 ) : StateViewModel<FeedState, FeedStateBuilder>(...), RefreshOwner by refresher {
+
+    @Inject constructor(repository: FeedRepository) : this(RefreshController(), repository)
 
     init { refresher.initialize(viewModelScope, ::reload) }
 
@@ -441,7 +500,9 @@ Guarantees baked into `RefreshController` — do not re-implement them:
 - `refresh()` before `initialize()` throws `UninitializedPropertyAccessException` (fail-fast).
 
 Two-phase `initialize()` is deliberate: the `by`-delegation expression cannot reference
-`viewModelScope`. Screens whose state already carries a refreshing flag skip the mixin and use the
+`viewModelScope`. The controller is created in a secondary `@Inject` constructor because Hilt
+ignores Kotlin default arguments — a `refresher: RefreshController = RefreshController()` parameter
+on the injected constructor fails the graph, since `RefreshController` has no binding. Screens whose state already carries a refreshing flag skip the mixin and use the
 primitive `FdKitRefresh*` overloads (section 6) — the approaches interoperate without adapters.
 
 ### RemoteData — the request-lifecycle value
@@ -624,6 +685,9 @@ Building blocks:
   — `transition { null }` opts out of an app-wide provider; unset, it follows
   `LocalContentTransitions`, which animates nothing by default. The transition is keyed on the
   `RemoteData` variant, so a new `Fetched` payload recomposes without re-running it.
+- **`FdKitErrorContent(message, onRetry)`** — the SDK's default error presentation (centered message
+  above a retry button), used by the default loading and paging error slots. Reuse it in a custom
+  `LoadingDefaults`/`PagingDefaults` that changes only the wording, so the look stays the same.
 - **`PagingContent`** — `Flow<PagingData<T>>.PagingContent(itemKey = { it.id.toString() }) { Item { i, x -> ... } }`
   (`itemKey` is `(T) -> String` — convert non-string ids). Pull-to-refresh built in; slots
   `Item/Loading/EmptyError/RefreshError/Empty/PrependLoading/PrependError/AppendLoading/AppendError/Header`, of which everything but
@@ -656,7 +720,7 @@ Building blocks:
   without doing anything. Override `PagingDefaults.RefreshError` to tell the two apart. While the
   banner is up it is the only error surface — `AppendError` is suppressed, because `retry()` restarts
   every failed load state at once and two messages would report one outcome.
-- **Migrating an existing `PagingDefaults`** (this release breaks it twice, deliberately): the slot
+- **Migrating an existing `PagingDefaults`** from before 0.0.5 (that release broke it twice, deliberately): the slot
   receiver changes `LazyItemScope` -> `FdkPagingSlotScope`, and both error slots gain the failing
   throwable, the empty-state one is renamed, and the static-header DSL slot `Prepend` becomes
   `Header` (freed up for `PrependLoading`/`PrependError`, the real paging load states at that end,
@@ -688,7 +752,10 @@ Building blocks:
     states emitted into a grid the screen **already owns**, for a paged section sharing one
     `LazyVerticalGrid` with a header or a summary card. Takes collected `LazyPagingItems` (the
     caller calls `collectAsLazyPagingItems()`), and the caller's own `isRefreshing` if it drives
-    pull-to-refresh itself. The container is a thin wrapper over this.
+    pull-to-refresh itself. The container is a thin wrapper over this. Call
+    `KeepRefreshErrorInView(gridState, items)` beside it, with the grid's own state — the container
+    does this itself; without it a `RefreshError` banner over a grid at its top lands just above
+    the viewport, and the first row slides under the top edge when the banner goes away.
 
   Load-state slots are emitted full-span; `Item` keeps `LazyGridItemScope`, so
   `Modifier.animateItem()` still works and a removed tile lets the rest close up. Slot DSL is shared
@@ -696,7 +763,8 @@ Building blocks:
   layout.
 
   `LazyListScope.pagingItems(...)` is the list twin of the same extension, for a paged section
-  inside a `LazyColumn` the screen owns; `PagingContent` is a thin wrapper over it.
+  inside a `LazyColumn` the screen owns; `PagingContent` is a thin wrapper over it. Here too, call
+  `KeepRefreshErrorInView(listState, items)` beside the list.
 
   **Rows the pager itself produces** (a date divider from `PagingData.insertSeparators`) are loaded
   items like any other, so in a grid they take one cell unless the call says otherwise. Pass
@@ -732,7 +800,9 @@ Building blocks:
   declare a string of that name in the app to reword it, no `TopBarDefaults` override needed. Declare
   it in every locale the SDK ships (default, `ru`, `el`): resources merge per qualifier, so a locale
   the app leaves out keeps the SDK's wording.
-- **ui-kit**: `FdKitCenterBox` (Box- and Column-scoped centering), `currentLocale`, and
+- **ui-kit**: `FdKitCenterBox` (Box- and Column-scoped centering), `FdKitCenteredVertically` /
+  `FdKitCenteredVerticallyHorizontally` (center a block inside a full-size column, with a
+  `verticalBias`), `currentLocale`, and
   locale-aware date formatting in composables:
   `localizedFormat(date) { ddMMMyyyy() }` — recomposes on device-language change.
 

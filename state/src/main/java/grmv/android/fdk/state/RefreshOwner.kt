@@ -29,6 +29,17 @@ import kotlinx.coroutines.yield
  *     private suspend fun reload() { /* same code path as the initial load */ }
  * }
  * ```
+ * With Hilt, create the controller in a secondary `@Inject` constructor instead — Hilt ignores
+ * default arguments and has no binding for [RefreshController]:
+ * ```
+ * @HiltViewModel
+ * class FeedViewModel private constructor(
+ *     private val refresher: RefreshController,
+ *     private val repository: FeedRepository,
+ * ) : BaseViewModel(), RefreshOwner by refresher {
+ *     @Inject constructor(repository: FeedRepository) : this(RefreshController(), repository)
+ * }
+ * ```
  * Screen side:
  * ```
  * viewModel.FdKitRefreshLazyColumn { items(...) { ... } }
