@@ -6,6 +6,8 @@
 **FdKit** — Android **F**ast **D**evelopment **K**it. A modular Android library providing
 state, networking, persistence, logging, and slot-based Compose UI primitives for building apps fast.
 
+Docs and agent skill: [truegrom.github.io](https://truegrom.github.io/)
+
 - **Group:** `io.github.truegrom`
 - **Java / Kotlin JVM target:** 17
 - **minSdk:** 26
@@ -117,6 +119,9 @@ mkdir -p .claude/skills/using-fdkit
 curl -o .claude/skills/using-fdkit/SKILL.md \
   https://raw.githubusercontent.com/TrueGrom/android-fdk/master/SKILL.md
 ```
+
+Install commands for Claude Code, Cursor and Codex are also on the
+[agent skill page](https://truegrom.github.io/fdkit-agent-skill.html).
 
 ## Requirements
 
