@@ -1,8 +1,6 @@
 name: Build & Lint
 
 on:
-  push:
-    branches: [ master ]
   pull_request:
     branches: [ master ]
 
@@ -25,17 +23,3 @@ jobs:
 
       - name: Assemble, lint, unit tests
         run: ./gradlew assembleRelease lint test
-
-  dependency-submission:
-    if: github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-
-      - uses: ./.github/actions/setup-corretto
-
-      - name: Submit dependency graph
-        uses: gradle/actions/dependency-submission@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
