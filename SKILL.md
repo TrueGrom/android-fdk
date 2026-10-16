@@ -791,6 +791,12 @@ Building blocks:
   `duration(...)` is not called: `Short` without an `actionLabel`, `Long` with one — a snackbar is
   the only place its action exists, so an undo is not given four seconds to be noticed. Set
   `duration()` explicitly to override; `withDismissAction()` does not affect the choice.
+  `showSnackbar { … }` (and `showSnackbar(event)`) returns a `Job`: `cancel()` withdraws the
+  snackbar whether it is still queued or on screen, and fires neither `onAction` nor `onDismiss` —
+  use it when a snackbar can go stale, e.g. an undo superseded by a newer change.
+  `hostState.currentSnackbarData?.dismiss()` reaches only the visible one and fires its
+  `onDismiss`. With no message the call no-ops and returns an already-completed `Job`, so the
+  handle is never null.
 - **Top bars**: `FdKitTopBarTextTitle` / `FdKitTopBarHeadlineTitle` (back arrow via
   `onNavigateBack: (() -> Unit)?` — the callback param is `onNavigateBack`, not `onBack`; pass
   `navigationIcon` to replace the icon entirely), `FdKitFeatureTopBar` (no back default —

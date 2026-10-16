@@ -3,6 +3,7 @@ package grmv.android.fdk.screen.snackbar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import grmv.android.fdk.state.ActionEmitter
+import kotlinx.coroutines.Job
 
 /**
  * Marks a one-shot screen event that should surface as a snackbar.
@@ -33,9 +34,11 @@ interface SnackbarEvent {
 /**
  * Shows the snackbar declared by [event] through its [SnackbarEvent.snackbar] configuration.
  *
- * Convenience over [SnackbarManager.showSnackbar]; no-ops when the event sets no message text.
+ * Convenience over [SnackbarManager.showSnackbar], with the same contract: no-ops when the event
+ * sets no message text, and returns the [Job] whose cancellation withdraws the snackbar without
+ * firing its callbacks.
  */
-fun SnackbarManager.showSnackbar(event: SnackbarEvent) =
+fun SnackbarManager.showSnackbar(event: SnackbarEvent): Job =
     showSnackbar { with(event) { snackbar() } }
 
 /**

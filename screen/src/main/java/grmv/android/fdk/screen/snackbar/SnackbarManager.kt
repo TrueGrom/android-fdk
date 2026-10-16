@@ -15,6 +15,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -95,16 +96,30 @@ class SnackbarManager internal constructor(
     /**
      * Builds a [SnackbarMessage] via the [SnackbarBuilder] DSL and shows it on [hostState].
      *
-     * No-ops when [builder] sets no [SnackbarBuilder.message] text. Shows on the manager's
-     * [CoroutineScope] and dispatches [SnackbarBuilder.onAction] / [SnackbarBuilder.onDismiss]
-     * according to the result.
+     * Shows on the manager's [CoroutineScope] and dispatches [SnackbarBuilder.onAction] /
+     * [SnackbarBuilder.onDismiss] according to the result. Snack bars queue: one asked for while
+     * another is on screen waits its turn.
+     *
+     * The returned [Job] is the handle for taking the snackbar back. Cancelling it withdraws the
+     * snackbar wherever it is — a queued one never shows, a visible one is dismissed — and fires
+     * **neither** [SnackbarBuilder.onAction] nor [SnackbarBuilder.onDismiss]: the caller withdrew
+     * it, the reader did not dismiss it. Use it when a snackbar can turn stale before the reader
+     * acts on it, e.g. an undo whose change has been superseded.
+     * [SnackbarHostState.currentSnackbarData] reaches only the visible snackbar, so it cannot
+     * withdraw a queued one.
+     *
+     * The job lives on the manager's scope, so leaving the composition cancels it the same way.
+     *
+     * No-ops when [builder] sets no [SnackbarBuilder.message] text, and then returns an
+     * already-completed [Job] — callers can hold one non-null handle and cancel it unconditionally.
      *
      * @param builder configures the message text, action, duration, and result callbacks.
+     * @return the job showing the snackbar; cancel it to withdraw the snackbar.
      */
-    fun showSnackbar(builder: SnackbarBuilder.() -> Unit) {
+    fun showSnackbar(builder: SnackbarBuilder.() -> Unit): Job {
         val message = SnackbarBuilderImpl(context).apply(builder).build()
-        if (message.message.isEmpty()) return
-        scope.launch {
+        if (message.message.isEmpty()) return Job().apply { complete() }
+        return scope.launch {
             val result = hostState.showSnackbar(
                 message = message.message,
                 actionLabel = message.actionLabel,
